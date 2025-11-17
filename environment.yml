@@ -1,0 +1,17 @@
+name: MINGLE
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - anndata
+  - pandas
+  - seaborn
+  - numpy
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - tqdm
+  - pip
+  - pip:
+      - multiprocess  # For advanced multiprocessing (if needed)

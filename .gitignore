@@ -21,3 +21,5 @@ __pycache__/
 
 # uv
 /scripts/uv.lock
+MINGLE/src/MINGLE/pl/Edges_pl.ipynb
+MINGLE/src/MINGLE/pl/GMM_pl.ipynb

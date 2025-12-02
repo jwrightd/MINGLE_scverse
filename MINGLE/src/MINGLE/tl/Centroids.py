@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import math
 import os
 import pandas as pd
+from pathlib import Path
 
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
@@ -17,13 +18,22 @@ from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 
 # @param filePath: filePath to .csv or .h5ad containing cell information
-def read_file(filePath):
-    # For .h5ad files
-    #TODO: .csv compatibility
-    return ad.read(filePath)
+def read_file(path):
+    path = Path(path)
+    ext = path.suffix.lower()
+    if ext == ".csv":
+        return pd.read_csv(path)
+    elif ext == ".h5ad":
+        return ad.read_h5ad(path)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}. Expected .csv or .h5ad")
 
 # @param adata: AnnData object containing cell information
 def KNN(adata):
+    X = 'x' #HERE
+    Y = 'y'
+    reg = 'unique_region'
+    cluster_col = 'cell_type'
     def get_windows(job, n_neighbors):
         # Unpack the job tuple containing start_time, idx, tissue_name, and indices
         start_time, idx, tissue_name, indices = job
@@ -32,13 +42,13 @@ def KNN(adata):
         job_start = time.time()
 
         # Get the subset of the dataset for the specific tissue
-        tissue = adata[adata.obs['filename'] == tissue_name]
+        tissue = adata[adata.obs[reg] == tissue_name] #HERE
 
         # Extract the coordinates (X, Y) for the points to be fitted from the tissue subset
-        to_fit = tissue.obs[['x', 'y']].values
+        to_fit = tissue.obs[[X, Y]].values
 
         # Fit the NearestNeighbors model on the tissue's X, Y coordinates
-        fit = NearestNeighbors(n_neighbors=n_neighbors).fit(tissue.obs[['x', 'y']].values)
+        fit = NearestNeighbors(n_neighbors=n_neighbors).fit(tissue.obs[[X, Y]].values)
 
         # Find the nearest neighbors for the points in 'to_fit'
         m = fit.kneighbors(to_fit)
@@ -55,10 +65,7 @@ def KNN(adata):
         return neighbors.astype(np.int32)
     
     # Extract relevant columns for KNN analysis
-    X = 'x'
-    Y = 'y'
-    reg = 'filename'
-    cluster_col = 'Cell_Type'
+
 
     # Create dummy variables from cluster_col and add to AnnData
     adata = adata.copy()  # Avoid modifying original AnnData object
@@ -95,36 +102,38 @@ def KNN(adata):
     for k in ks:
         window = pd.concat([pd.DataFrame(out_dict[(exp, k)][0], index=out_dict[(exp, k)][1].astype(int), columns=sum_cols) for exp in exps], axis=0)
         window = window.loc[adata.obs.index.values]
-        window = pd.concat([adata.obs[['filename', 'Cell_Type']], window], axis=1)
+        window = pd.concat([adata.obs[[reg, cluster_col]], window], axis=1)
         windows[k] = window
     return windows
 
 # @param adata: AnnData object containing cell data
 def centroid_Calculation(adata): 
     # Get neighborhood windows from KNN function
+    cluster_col = 'cell_type' #HERE
+    neighborhood_col = 'neighborhood'
     windows = KNN(adata)
 
     k = 10  # Choose the number of neighbors to analyze
     windows2 = windows[k]
-    cluster_col = 'Cell_Type'
+    
     windows2[cluster_col] = adata.obs[cluster_col]
     copy_cells = adata.obs.copy()
 
     filtered_cells = copy_cells
     filtered_cells.reset_index(inplace=True, drop=True)
 
-    cell_type_columns = adata.obs['Cell_Type'].unique()
+    cell_type_columns = adata.obs[cluster_col].unique()
     windows2[cell_type_columns] = windows2[cell_type_columns].astype('float32')
 
-    neighborhoods_to_loop = adata.obs['Neighborhood'].unique()
+    neighborhoods_to_loop = adata.obs[neighborhood_col].unique()
     all_results = []
 
     for neighborhood in neighborhoods_to_loop:
-        filtered_neighborhood_df = filtered_cells[filtered_cells['Neighborhood'] == neighborhood]
+        filtered_neighborhood_df = filtered_cells[filtered_cells[neighborhood_col] == neighborhood]
         cell_numbers_in_neighborhood = filtered_neighborhood_df.index.values
         matching_cells_df = windows2[windows2.index.isin(cell_numbers_in_neighborhood)]
 
-        mean_std_results = {'Neighborhood': neighborhood}
+        mean_std_results = {neighborhood_col: neighborhood}
 
         for column in cell_type_columns:
             if column in matching_cells_df.columns:

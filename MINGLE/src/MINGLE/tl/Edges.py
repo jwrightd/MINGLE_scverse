@@ -9,6 +9,8 @@ import sys
 import matplotlib.pyplot as plt
 import math
 import os
+import pathlib as Path
+import pandas as pd
 
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import MiniBatchKMeans
@@ -19,11 +21,15 @@ from itertools import combinations
 from tqdm import tqdm
 
 # @param filePath: filePath to .csv or .h5ad containing cell information
-def read_file(filePath):
-    # For CSV:
-    # df = pd.read_csv(filePath)
-    # For h5ad (AnnData):
-    return ad.read(filePath)
+def read_file(path):
+    path = Path(path)
+    ext = path.suffix.lower()
+    if ext == ".csv":
+        return pd.read_csv(path)
+    elif ext == ".h5ad":
+        return ad.read_h5ad(path)
+    else:
+        raise ValueError(f"Unsupported file type: {ext}. Expected .csv or .h5ad")
 
 # @param GMM_adata: AnnData object containing GMM results, 
 #        cell_adata: AnnData object containing raw annotated dataset
@@ -33,9 +39,14 @@ def mergeGMM(GMM_adata, cell_adata):
 
 # @param adata: AnnData object containing cell data (cell annotations in .obs)
 def findPositives(adata):
+    neighborhood_col = 'neighborhood'
+    cell_type = 'cell_type'
+    unique_region = 'unique_region'
+    X = 'x'
+    Y = 'y'
     # List of columns to use from .obs
-    neighborhoods_to_loop = adata.obs['Neighborhood'].unique().tolist()
-    neighborhoods_to_loop.extend(['Neighborhood', 'Cell_Type', 'filename', 'x', 'y'])
+    neighborhoods_to_loop = adata.obs[neighborhood_col].unique().tolist()
+    neighborhoods_to_loop.extend([neighborhood_col, cell_type, unique_region, X, Y])
 
     # Subset the obs dataframe with relevant columns
     df_probabilities = adata.obs[neighborhoods_to_loop]

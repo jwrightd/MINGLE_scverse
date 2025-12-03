@@ -146,4 +146,20 @@ def centroid_Calculation(adata):
 
     # Create a DataFrame from the results list
     results_df = pd.DataFrame(all_results)
-    return results_df
+    results_df = results_df.set_index(neighborhood_col)
+
+    # features are all remaining columns (means/stds)
+    feature_cols = results_df.columns.tolist()
+
+    # X: numeric matrix (n_neighborhoods x n_features)
+    X = results_df[feature_cols].to_numpy(dtype=np.float32)
+
+    # obs: neighborhoods as index
+    obs = pd.DataFrame(index=results_df.index)
+    obs[neighborhood_col] = results_df.index
+
+    # var: feature names as index
+    var = pd.DataFrame(index=feature_cols)
+    centroid_adata = ad.AnnData(X=X, obs=obs, var=var)
+
+    return centroid_adata

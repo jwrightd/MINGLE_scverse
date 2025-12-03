@@ -1,3 +1,5 @@
+#ONLY USING CPU FOR NOW
+
 #GMM File Includes:
 #1. Read-in the file (merged df)
 #2. Eliminated hardcoded items 
@@ -33,20 +35,38 @@ Y_COL = "y"          # column name for Y coordinate
 REGION_COL = "unique_region"
 
 # Cell type annotation
-CLUSTER_COL = "Cell Type"
+CLUSTER_COL = "cell_type"
 
 # Neighborhood annotation
-NEIGHBORHOOD_COL = "Neighborhood"
+NEIGHBORHOOD_COL = "neighborhood"
+
+# Global variables to hold loaded data
+CELLS_ADATA = None
+CENTROIDS_ADATA = None
 
 
-# Reads cell CSV file and returns a pandas DataFrame; in this case cella
-def read_cell_file(filePath):
-    df = pd.read_csv(filePath)
-    adata = ad.AnnData(X=np.zeros((len(df), 1)), obs=df)
-    return adata
+def read_file(cells_path, centroids_path):
+
+    global CELLS_ADATA, CENTROIDS_ADATA
+
+    # Load cells 
+    df_cells = pd.read_csv(cells_path).reset_index(drop=True)
+    CELLS_ADATA = ad.AnnData(
+        X=np.zeros((len(df_cells), 1)),
+        obs=df_cells
+    )
+
+    # Load centroids 
+    df_centroids = pd.read_csv(centroids_path).reset_index(drop=True)
+    CENTROIDS_ADATA = ad.AnnData(
+        X=np.zeros((len(df_centroids), 1)),
+        obs=df_centroids
+    )
+
+    return CELLS_ADATA, CENTROIDS_ADATA
 
 
-def KNN(cells):
+def kNN(CELLS_ADATA):
 
     def get_windows(job, n_neighbors):
         # Unpack the job tuple containing start_time, idx, tissue_name, and indices
@@ -94,7 +114,7 @@ def KNN(cells):
          
 
     # Convert AnnData obs to working DataFrame
-    obs = cells.obs.copy()
+    obs = CELLS_ADATA.obs.copy()
     obs.reset_index(inplace=True, drop=True)
 
     # Define column names that will be used for neighborhood analysis
@@ -110,8 +130,8 @@ def KNN(cells):
     obs = pd.concat([obs, pd.get_dummies(obs[cluster_col])], axis=1)
 
     # Store dummy variable matrix inside AnnData
-    cells.obsm["celltype_matrix"] = obs[pd.get_dummies(obs[cluster_col]).columns].values
-    cells.uns["cell_type_features"] = list(pd.get_dummies(obs[cluster_col]).columns)
+    CELLS_ADATA.obsm["celltype_matrix"] = obs[pd.get_dummies(obs[cluster_col]).columns].values
+    CELLS_ADATA.uns["cell_type_features"] = list(pd.get_dummies(obs[cluster_col]).columns)
 
     # Get unique values from the cluster column
     sum_cols = obs[cluster_col].unique()
@@ -177,33 +197,24 @@ def KNN(cells):
     return windows
 
 
-
-# Reads  Centroids file and returns a pandas DataFrame; in this case centroid data
-def read_centroids_file(filePath):
-    df_centroids = pd.read_csv(filePath)
-    return df_centroids
-
-
-
 #Parameters are the cells dataframe and the centroids dataframe
-def gpu_gmm_probability(cells, df_centroids):
+def gpu_gmm_probability(CELLS_ADATA, CENTROIDS_ADATA):
 
     cluster_col = CLUSTER_COL
 
     # Parameter for cell analysis
-    windows = KNN(cells)
+    windows = kNN(CELLS_ADATA)
 
     #Choose k value to analyze and pull out from dictionary of stored results of vector
     k = 10
     windows2 = windows[k]
 
     #Add cell type column to output windows dataframe
-    windows2[cluster_col] = cells.obs[cluster_col].values
+    windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
 
     # Your neighborhoods and cell types (unchanged)
-    neighborhoods_to_loop = cells.obs[NEIGHBORHOOD_COL].unique()
-    cell_type_features = cells.obs[cluster_col].unique()
-
+    neighborhoods_to_loop = CELLS_ADATA.obs[NEIGHBORHOOD_COL].unique()
+    cell_type_features = CELLS_ADATA.obs[cluster_col].unique()
     # Adjust batch size according to your GPU memory (~8GB)
     batch_size = 20000
 
@@ -211,13 +222,13 @@ def gpu_gmm_probability(cells, df_centroids):
     num_batches = (num_cells + batch_size - 1) // batch_size  # ceiling division
 
     # Extract neighborhood names and centroids
-    neighborhood_names = df_centroids['Neighborhood'].values
+    neighborhood_names = CENTROIDS_ADATA.obs['Neighborhood'].values
     mean_cols = [f"{ct}_mean" for ct in cell_type_features]
     std_cols = [f"{ct}_std" for ct in cell_type_features]
 
     # Convert means and stds once to GPU arrays
-    means = cp.array(df_centroids[mean_cols].values)  # shape (num_neighborhoods, num_cell_types)
-    stds = cp.array(df_centroids[std_cols].values)    # same shape
+    means = cp.array(CENTROIDS_ADATA.obs[mean_cols].values)  # shape (num_neighborhoods, num_cell_types)
+    stds = cp.array(CENTROIDS_ADATA.obs[std_cols].values)    # same shape
 
     def compute_batch_probs(batch_df):
         # Convert cell data to GPU array
@@ -269,7 +280,7 @@ def gpu_gmm_probability(cells, df_centroids):
     probabilities_df = pd.concat(results).sort_index()
 
     # Store inside AnnData
-    cells.obsm["neighborhood_probabilities"] = probabilities_df.values
-    cells.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
+    CELLS_ADATA.obsm["neighborhood_probabilities"] = probabilities_df.values
+    CELLS_ADATA.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
 
     return probabilities_df

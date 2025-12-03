@@ -1,69 +1,112 @@
-#LLM conversion to Scverse
+from __future__ import annotations
 
-import anndata as ad
-import seaborn as sns
+from typing import Optional
+
 import numpy as np
-from scipy.stats import norm
-import time
-import sys
-import matplotlib.pyplot as plt
-import math
-import os
-import pathlib as Path
 import pandas as pd
+import anndata as ad
+from anndata import AnnData
 
-from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
 
-from itertools import combinations
-from tqdm import tqdm
+def mergeGMM(
+    GMM_adata: AnnData,
+    cell_adata: AnnData,
+    *,
+    join: str = "outer",
+) -> AnnData:
+    """
+    Merge GMM results AnnData with the main cell AnnData along observations.
 
-# @param filePath: filePath to .csv or .h5ad containing cell information
-def read_file(path):
-    path = Path(path)
-    ext = path.suffix.lower()
-    if ext == ".csv":
-        return pd.read_csv(path)
-    elif ext == ".h5ad":
-        return ad.read_h5ad(path)
+    This is the scverse-style equivalent of the original `mergeGMM`,
+    but implemented with `anndata.concat` and a clear API.
+
+    Parameters
+    ----------
+    GMM_adata
+        AnnData containing GMM results (e.g. neighborhood probabilities, cluster labels).
+        Its `.obs_names` must match (a subset of) `cell_adata.obs_names`.
+    cell_adata
+        AnnData containing the main annotated dataset (cell metadata, coordinates, etc.).
+    join
+        How to join variables (columns) from the two AnnData objects.
+        Passed to `anndata.concat(join=...)`. Common choices:
+        - "outer" (default): union of variables
+        - "inner": intersection of variables
+
+    Returns
+    -------
+    AnnData
+        New AnnData with:
+          - obs: aligned cells (by `obs_names`)
+          - var: combined variables from `cell_adata` and `GMM_adata`
+          - X/obsm/obsp/misc merged according to `anndata.concat` rules.
+    """
+    # We want to align on obs (cells) and concatenate along variables.
+    # axis=1 → concatenate vars, match obs by name.
+    merged = ad.concat(
+        {"cell": cell_adata, "gmm": GMM_adata},
+        axis=1,
+        join=join,
+        label=None,
+        merge="unique",
+    )
+    return merged
+
+
+def findPositives(
+    adata: AnnData,
+    *,
+    prob_key: str = "neighborhood_probabilities",
+    threshold: float = 0.25,
+    result_key: str = "Count_Above_Threshold",
+) -> AnnData:
+    """
+    Count, per cell, how many neighborhood probabilities exceed a threshold.
+
+    This is the scverse-compatible version of your original `findPositives`,
+    but vectorized and using `adata.obsm[prob_key]` instead of `.obs` columns.
+
+    Parameters
+    ----------
+    adata
+        AnnData with a per-cell neighborhood probability matrix stored in
+        `adata.obsm[prob_key]`. Shape should be (n_cells, n_neighborhoods).
+    prob_key
+        Key in `adata.obsm` where the neighborhood probability matrix is stored.
+        Can be a NumPy array or a pandas DataFrame. If a DataFrame, its index
+        should align with `adata.obs_names`.
+    threshold
+        Probability threshold. For each cell, we count how many neighborhood
+        probabilities are strictly greater than this value.
+    result_key
+        Name of the column to create in `adata.obs` where the counts are stored.
+
+    Returns
+    -------
+    AnnData
+        The same AnnData object (mutated in-place) with a new column
+        `adata.obs[result_key]` containing the counts.
+    """
+    if prob_key not in adata.obsm:
+        raise KeyError(f"{prob_key!r} not found in adata.obsm")
+
+    prob_raw = adata.obsm[prob_key]
+
+    # Align with obs and get a 2D array
+    if isinstance(prob_raw, pd.DataFrame):
+        probs = prob_raw.reindex(adata.obs_names).to_numpy()
     else:
-        raise ValueError(f"Unsupported file type: {ext}. Expected .csv or .h5ad")
+        probs = np.asarray(prob_raw)
+        if probs.shape[0] != adata.n_obs:
+            raise ValueError(
+                f"adata.obsm[{prob_key!r}] has shape {probs.shape}, "
+                f"but expected first dimension == n_obs ({adata.n_obs})"
+            )
 
-# @param GMM_adata: AnnData object containing GMM results, 
-#        cell_adata: AnnData object containing raw annotated dataset
-def mergeGMM(GMM_adata, cell_adata):
-    # Merge AnnData objects based on their observations (cells)
-    return GMM_adata.concatenate(cell_adata, join='outer', axis=1)
+    # Vectorized count: how many neighborhoods per cell have p > threshold
+    counts = (probs > threshold).sum(axis=1)
 
-# @param adata: AnnData object containing cell data (cell annotations in .obs)
-def findPositives(adata):
-    neighborhood_col = 'neighborhood'
-    cell_type = 'cell_type'
-    unique_region = 'unique_region'
-    X = 'x'
-    Y = 'y'
-    # List of columns to use from .obs
-    neighborhoods_to_loop = adata.obs[neighborhood_col].unique().tolist()
-    neighborhoods_to_loop.extend([neighborhood_col, cell_type, unique_region, X, Y])
-
-    # Subset the obs dataframe with relevant columns
-    df_probabilities = adata.obs[neighborhoods_to_loop]
-
-    # Set threshold
-    threshold = 0.25
-
-    # Initialize tqdm progress bar
-    with tqdm(total=df_probabilities.shape[0]) as pbar:
-        counts = []
-        for _, row in df_probabilities.iterrows():
-            # Count how many neighborhoods have a probability above the threshold
-            count = (row > threshold).sum()
-            counts.append(count)
-            pbar.update(1)  # Update the progress bar by 1 step after processing each row
-
-    # Add the 'Count_Above_Threshold' as a new column in .obs
-    adata.obs['Count_Above_Threshold'] = counts
+    # Store result in .obs
+    adata.obs[result_key] = counts.astype(int)
 
     return adata

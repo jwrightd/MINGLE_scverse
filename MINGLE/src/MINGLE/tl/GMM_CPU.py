@@ -7,20 +7,11 @@
 #TODO:add plotting functions, clean up code,  
 import anndata as ad
 import pandas as pd
-import seaborn as sns
 import numpy as np
 from scipy.stats import norm
-
 import time
-import sys
-import matplotlib.pyplot as plt
-import math
-import os
 
 from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
 
 # For users running CPU parallel processing version
 from multiprocessing import Pool, cpu_count
@@ -34,18 +25,37 @@ Y_COL = "y"          # column name for Y coordinate
 REGION_COL = "unique_region"
 
 # Cell type annotation
-CLUSTER_COL = "Cell Type"
+CLUSTER_COL = "cell_type"
 
 # Neighborhood annotation
-NEIGHBORHOOD_COL = "Neighborhood"
+NEIGHBORHOOD_COL = "neighborhood"
 
-# Reads cell CSV file and returns a pandas DataFrame; in this case cella
-def read_file(filePath):
-    df = pd.read_csv(filePath)
-    adata = ad.AnnData(X=np.zeros((len(df), 1)), obs=df)
-    return adata
+# Global variables to hold loaded data
+CELLS_ADATA = None
+CENTROIDS_ADATA = None
 
-def KNN(cells_adata):
+
+def read_file(cells_path, centroids_path):
+
+    global CELLS_ADATA, CENTROIDS_ADATA
+
+    # Load cells 
+    df_cells = pd.read_csv(cells_path).reset_index(drop=True)
+    CELLS_ADATA = ad.AnnData(
+        X=np.zeros((len(df_cells), 1)),
+        obs=df_cells
+    )
+
+    # Load centroids 
+    df_centroids = pd.read_csv(centroids_path).reset_index(drop=True)
+    CENTROIDS_ADATA = ad.AnnData(
+        X=np.zeros((len(df_centroids), 1)),
+        obs=df_centroids
+    )
+
+    return CELLS_ADATA, CENTROIDS_ADATA
+
+def kNN(CELLS_ADATA):
     def get_windows(job, n_neighbors):
         # Unpack the job tuple containing start_time, idx, tissue_name, and indices
         start_time, idx, tissue_name, indices = job
@@ -92,7 +102,7 @@ def KNN(cells_adata):
          
 
     # cells is now expected to be an AnnData object
-    obs = cells.obs.copy()
+    obs = CELLS_ADATA.obs.copy()
 
     # Define column names that will be used for neighborhood analysis
     X = X_COL                 # Variable for the X coordinate
@@ -108,8 +118,8 @@ def KNN(cells_adata):
     obs = pd.concat([obs, pd.get_dummies(obs[cluster_col])], axis=1)
 
     # Save cell type dummy names to AnnData for later use
-    cells.obsm["celltype_matrix"] = obs[pd.get_dummies(obs[cluster_col]).columns].values
-    cells.uns["cell_type_features"] = list(pd.get_dummies(obs[cluster_col]).columns)
+    CELLS_ADATA.obsm["celltype_matrix"] = obs[pd.get_dummies(obs[cluster_col]).columns].values
+    CELLS_ADATA.uns["cell_type_features"] = list(pd.get_dummies(obs[cluster_col]).columns)
 
     # Get unique values from the 'cluster_col' column to use for summarization
     sum_cols = obs[cluster_col].unique()
@@ -187,38 +197,31 @@ def KNN(cells_adata):
         windows[k] = window
     return windows
 
-
-# Reads  Centroids file and returns a pandas DataFrame; in this case centroid data
-def read_centroids_file(filePath):
-    df_centroids = pd.read_csv(filePath)
-    return df_centroids
-
-
 #Parameters are the cells dataframe and the centroids dataframe
-def cpu_gmm_probability(cells, df_centroids):
+def cpu_gmm_probability(CELLS_ADATA, CENTROIDS_ADATA):
     cluster_col = CLUSTER_COL
     # Parameter for cell analysis
-    windows = KNN(cells)
+    windows = kNN(CELLS_ADATA)
     #Choose k value to analyze and pull out from dictionary of stored results of vector
     k = 10
     windows2 = windows[k]
     #Add cell type column to output windows dataframe
-    windows2[cluster_col] = cells.obs[cluster_col].values
+    windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
 
     # List of neighborhoods to loop through, update this for other datasets
-    neighborhoods_to_loop = cells.obs[NEIGHBORHOOD_COL].unique()
+    neighborhoods_to_loop = CELLS_ADATA.obs[NEIGHBORHOOD_COL].unique()
 
     # List of cell types, update this for other datasets
-    cell_type_features =  cells.obs[cluster_col].unique()
+    cell_type_features =  CELLS_ADATA.obs[cluster_col].unique()
 
     # Function to calculate probabilities for a single cell
     def calculate_probabilities_for_cell(args):
-        cell_data, df_centroids, cell_type_features = args  # Unpack the arguments
+        CELLS_ADATA, CENTROIDS_ADATA, cell_type_features = args  # Unpack the arguments
 
         neighborhood_probs = {}
 
-        # Loop through each neighborhood (each row in df_centroids)
-        for _, centroid_row in df_centroids.iterrows():
+        # Loop through each neighborhood (each row in CENTROIDS_ADATA.obs)
+        for _, centroid_row in CENTROIDS_ADATA.obs.iterrows():
             neighborhood_name = centroid_row['Neighborhood']
             total_prob = 1
 
@@ -232,7 +235,7 @@ def cpu_gmm_probability(cells, df_centroids):
                     std = centroid_row[std_col]
 
                     # Get the value of the current cell for this cell type (nearest neighbor count)
-                    cell_value = cell_data.get(cell_type, np.nan)
+                    cell_value = CELLS_ADATA.obs.loc[CELLS_ADATA.obs.index, cell_type] if cell_type in CELLS_ADATA.obs.columns else np.nan
 
                     # If std is zero, check if the cell value matches the mean
                     if std == 0:
@@ -258,7 +261,7 @@ def cpu_gmm_probability(cells, df_centroids):
         return neighborhood_probs
 
     # Function to parallelize the calculations across all cells
-    def parallelize_probability_calculations(windows2, df_centroids, cell_type_features):
+    def parallelize_probability_calculations(windows2, CENTROIDS_ADATA, cell_type_features):
         # Use all available CPUs for parallel processing
         num_processes = cpu_count()
         # Create a pool of workers
@@ -266,22 +269,22 @@ def cpu_gmm_probability(cells, df_centroids):
             # Use tqdm to display progress bar
             results = list(tqdm(pool.imap(
                 calculate_probabilities_for_cell,  # Pass the function directly
-                [(windows2.loc[cell_index], df_centroids, cell_type_features) for cell_index in windows2.index]), total=len(windows2)))
+                [(windows2.loc[cell_index], CENTROIDS_ADATA, cell_type_features) for cell_index in windows2.index]), total=len(windows2)))
 
         return results
 
     # Call the parallelization function
     #probabilities_list = []
     #for cell_index in windows2.index:
-    #    probabilities_list.append(calculate_probabilities_for_cell((windows2.loc[cell_index], df_centroids, cell_type_features)))
+    #    probabilities_list.append(calculate_probabilities_for_cell((windows2.loc[cell_index], CENTROIDS_ADATA, cell_type_features)))
     #    print(cell_index)
-    probabilities_list = parallelize_probability_calculations(windows2, df_centroids, cell_type_features)
+    probabilities_list = parallelize_probability_calculations(windows2, CENTROIDS_ADATA, cell_type_features)
 
     # Convert the results into a DataFrame
     probabilities_df = pd.DataFrame(probabilities_list, index=windows2.index)
 
     # Attach to AnnData for scverse compatibility
-    cells.obsm["neighborhood_probabilities"] = probabilities_df.values
-    cells.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
+    CELLS_ADATA.obsm["neighborhood_probabilities"] = probabilities_df.values
+    CELLS_ADATA.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
 
     return probabilities_df

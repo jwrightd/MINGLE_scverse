@@ -2,15 +2,13 @@
 
 import anndata as ad
 import numpy as np
-from scipy.stats import norm
 import time
-import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
 
 from sklearn.neighbors import NearestNeighbors
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence, Union
+from typing import Dict, Optional, Sequence, Union
 
 import anndata as ad
 import numpy as np
@@ -291,6 +289,3 @@ def centroid_Calculation(
         adata.uns[store_key] = centroid_adata
 
     return centroid_adata
-
-
-

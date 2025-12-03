@@ -1,65 +1,53 @@
-#GMM File Includes:
-#1. Read-in the file (merged df)
-#2. Eliminated hardcoded items 
-#3. KNN & get_windows function
-#4. CPU based probability function
-
-#TODO:add plotting functions, clean up code,  
-import anndata as ad
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy.stats import norm
-from typing import Optional, Union, Dict, Sequence
-
-from sklearn.neighbors import NearestNeighbors
-
-# For users running CPU parallel processing version
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
-
+from typing import Optional, Union, Dict, Sequence
+import anndata as ad
 from .knn import KNN
 
-"""
-# Coordinates
-X_COL = "x"          # column name for X coordinate
-Y_COL = "y"          # column name for Y coordinate
+# Helper function to calculate probabilities for each cell (moved outside for parallelization)
+def calculate_probabilities_for_cell(args):
+    # Unpack the arguments
+    cell_index, windows2, centroid_rows, cell_type_features, neighborhood_col = args
+    neighborhood_probs = {}
 
-# Region or filename to group images
-REGION_COL = "unique_region"
+    # Iterate through each centroid (neighborhood)
+    for centroid_row in centroid_rows:
+        neighborhood_name = centroid_row[neighborhood_col]
+        total_prob = 1
 
-# Cell type annotation
-CLUSTER_COL = "cell_type"
+        # For each cell type, calculate the probability
+        for cell_type in cell_type_features:
+            mean_col = f'{cell_type}_mean'
+            std_col = f'{cell_type}_std'
 
-# Neighborhood annotation
-NEIGHBORHOOD_COL = "neighborhood"
+            if mean_col in centroid_row and std_col in centroid_row:
+                mean = centroid_row[mean_col]
+                std = centroid_row[std_col]
 
-# Global variables to hold loaded data
-CELLS_ADATA = None
-CENTROIDS_ADATA = None
+                # Get the value of the current cell for this cell type
+                cell_value = windows2.loc[cell_index, cell_type] if cell_type in windows2.columns else np.nan
 
+                # Check if std is zero, calculate probability
+                if std == 0:
+                    cell_prob = 1 if cell_value == mean else 0
+                else:
+                    cell_prob = norm.pdf(cell_value, loc=mean, scale=std)
 
-def read_file(cells_path, centroids_path):
+                total_prob *= cell_prob  # Multiply for each cell type
 
-    global CELLS_ADATA, CENTROIDS_ADATA
+        # Store the neighborhood probability for this cell
+        neighborhood_probs[neighborhood_name] = total_prob
 
-    # Load cells 
-    df_cells = pd.read_csv(cells_path).reset_index(drop=True)
-    CELLS_ADATA = ad.AnnData(
-        X=np.zeros((len(df_cells), 1)),
-        obs=df_cells
-    )
+    # Normalize the probabilities to sum to 1
+    total_prob_sum = sum(neighborhood_probs.values())
+    for neighborhood in neighborhood_probs:
+        neighborhood_probs[neighborhood] /= total_prob_sum
 
-    # Load centroids 
-    df_centroids = pd.read_csv(centroids_path).reset_index(drop=True)
-    CENTROIDS_ADATA = ad.AnnData(
-        X=np.zeros((len(df_centroids), 1)),
-        obs=df_centroids
-    )
+    return neighborhood_probs
 
-    return CELLS_ADATA, CENTROIDS_ADATA
-"""
-
-#Parameters are the cells dataframe and the centroids dataframe
 def cpu_gmm_probability(
     CELLS_ADATA: ad.AnnData,
     CENTROIDS_ADATA: ad.AnnData,
@@ -69,9 +57,9 @@ def cpu_gmm_probability(
     ks: Sequence[int] = (5, 10, 20),  # List of k values for neighbors
     threshold: float = 0.25,  # Probability threshold for counting
     num_processes: Optional[int] = None,  # Optional: number of processes for parallelism (defaults to max CPUs)
-) -> pd.DataFrame:
+) -> ad.AnnData:
     """
-    Calculate GMM probabilities for each cell's assigned neighborhood.
+    Calculate GMM probabilities for each cell's assigned neighborhood and return the AnnData object with probabilities stored in `obsm`.
 
     Parameters
     ----------
@@ -92,8 +80,8 @@ def cpu_gmm_probability(
 
     Returns
     -------
-    probabilities_df
-        DataFrame with probabilities for each cell and neighborhood.
+    CELLS_ADATA
+        AnnData object with computed neighborhood probabilities stored in `obsm["neighborhood_probabilities"]`.
     """
 
     # Ensure neighborhood columns exist in obs
@@ -101,7 +89,7 @@ def cpu_gmm_probability(
         raise KeyError(f"One or more required columns ({neighborhood_col}, {cluster_col}) are missing in obs.")
 
     # Step 1: Get KNN neighborhood windows
-    windows = KNN(CELLS_ADATA, ks=ks)
+    windows = KNN(CELLS_ADATA, cluster_col=cluster_col, ks=ks)
     k = 10  # You can change this if needed, default is 10
     windows2 = windows[k]
     windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
@@ -110,69 +98,36 @@ def cpu_gmm_probability(
     neighborhoods_to_loop = CELLS_ADATA.obs[neighborhood_col].unique().tolist()
     cell_type_features = CELLS_ADATA.obs[cluster_col].unique()
 
-    # Function to calculate probabilities for a single cell
-    def calculate_probabilities_for_cell(args):
-        cell_index, windows2, CELLS_ADATA, CENTROIDS_ADATA, cell_type_features = args
-        neighborhood_probs = {}
-
-        # Iterate through each centroid (neighborhood)
-        for _, centroid_row in CENTROIDS_ADATA.obs.iterrows():
-            neighborhood_name = centroid_row[neighborhood_col]
-            total_prob = 1
-
-            # For each cell type, calculate the probability
-            for cell_type in cell_type_features:
-                mean_col = f'{cell_type}_mean'
-                std_col = f'{cell_type}_std'
-
-                if mean_col in centroid_row and std_col in centroid_row:
-                    mean = centroid_row[mean_col]
-                    std = centroid_row[std_col]
-
-                    # Get the value of the current cell for this cell type
-                    cell_value = windows2.loc[cell_index, cell_type] if cell_type in windows2.columns else np.nan
-
-                    # Check if std is zero, calculate probability
-                    if std == 0:
-                        cell_prob = 1 if cell_value == mean else 0
-                    else:
-                        cell_prob = norm.pdf(cell_value, loc=mean, scale=std)
-
-                    total_prob *= cell_prob  # Multiply for each cell type
-
-            # Store the neighborhood probability for this cell
-            neighborhood_probs[neighborhood_name] = total_prob
-
-        # Normalize the probabilities to sum to 1
-        total_prob_sum = sum(neighborhood_probs.values())
-        for neighborhood in neighborhood_probs:
-            neighborhood_probs[neighborhood] /= total_prob_sum
-
-        return neighborhood_probs
+    # Extract centroid data as a list of rows (to pass to the multiprocessing pool)
+    centroid_rows = CENTROIDS_ADATA.obs.to_dict(orient='records')
 
     # Function to parallelize calculations across all cells
-    def parallelize_probability_calculations(windows2, CELLS_ADATA, CENTROIDS_ADATA, cell_type_features, num_processes):
+    def parallelize_probability_calculations(windows2, CELLS_ADATA, centroid_rows, cell_type_features, neighborhood_col, num_processes):
         # Use specified number of processes or default to all available CPUs
         if num_processes is None:
             num_processes = cpu_count()
+        print(num_processes)
+        # Prepare the arguments to pass into the function (cell_index, windows2, centroid_rows, cell_type_features, neighborhood_col)
+        task_args = [
+            (cell_index, windows2, centroid_rows, cell_type_features, neighborhood_col)
+            for cell_index in windows2.index
+        ]
 
+        # Use multiprocessing Pool with tqdm progress bar
         with Pool(num_processes) as pool:
-            # Use tqdm for progress bar
-            results = list(tqdm(pool.imap(
-                calculate_probabilities_for_cell,
-                [(cell_index, windows2, CELLS_ADATA, CENTROIDS_ADATA, cell_type_features) for cell_index in windows2.index]
-            ), total=len(windows2)))
-        
+            results = list(tqdm(pool.imap(calculate_probabilities_for_cell, task_args), total=len(windows2)))
+
         return results
 
     # Parallelize the calculations
-    probabilities_list = parallelize_probability_calculations(windows2, CELLS_ADATA, CENTROIDS_ADATA, cell_type_features, num_processes)
+    probabilities_list = parallelize_probability_calculations(windows2, CELLS_ADATA, centroid_rows, cell_type_features, neighborhood_col, num_processes)
 
     # Convert the results into a DataFrame
     probabilities_df = pd.DataFrame(probabilities_list, index=windows2.index)
 
-    # Attach to AnnData for scverse compatibility
+    # Step 3: Attach probabilities to AnnData object (store in obsm)
     CELLS_ADATA.obsm["neighborhood_probabilities"] = probabilities_df.values
     CELLS_ADATA.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
 
-    return probabilities_df
+    # Return the updated AnnData object
+    return CELLS_ADATA

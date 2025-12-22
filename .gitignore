@@ -2,7 +2,7 @@
 .DS_Store
 *~
 test.ipynb
-
+MINGLE/scripts
 # Caches
 __pycache__/
 .*cache/
@@ -23,3 +23,4 @@ __pycache__/
 /scripts/uv.lock
 MINGLE/src/MINGLE/pl/Edges_pl.ipynb
 MINGLE/src/MINGLE/pl/GMM_pl.ipynb
+

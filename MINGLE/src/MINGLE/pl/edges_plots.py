@@ -9,6 +9,7 @@ import seaborn as sns
 from anndata import AnnData
 
 from ._utils import save_figure
+from MINGLE.tl.edges import findPositives  
 
 def edges_positive_probability(
     adata: AnnData,

@@ -9,7 +9,6 @@ import seaborn as sns
 from anndata import AnnData
 
 from ._utils import save_figure
-from ..tl.Edges import findPositives
 
 def edges_positive_probability(
     adata: AnnData,

@@ -26,3 +26,6 @@ __pycache__/
 # docs
 /docs/generated/
 /docs/_build/
+
+tutorials/Edges_pl.ipynb
+tutorials/GMM_pl.ipynb

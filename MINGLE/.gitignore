@@ -29,3 +29,4 @@ __pycache__/
 
 tutorials/Edges_pl.ipynb
 tutorials/GMM_pl.ipynb
+*.csv

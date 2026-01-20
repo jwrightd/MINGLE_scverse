@@ -3,6 +3,7 @@ from typing import Union
 import anndata as ad
 import numpy as np
 import pandas as pd
+import muon as mu
 
 def read_file(path: Union[str, Path]) -> ad.AnnData:
     """
@@ -29,7 +30,6 @@ def read_file(path: Union[str, Path]) -> ad.AnnData:
     """
     path = Path(path)
     ext = path.suffix.lower()
-
     if ext == ".csv":
         df = pd.read_csv(path)
 
@@ -40,6 +40,16 @@ def read_file(path: Union[str, Path]) -> ad.AnnData:
 
     elif ext == ".h5ad":
         return ad.read_h5ad(path)
-
+   
     else:
         raise ValueError(f"Unsupported file type: {ext}. Expected .csv or .h5ad")
+    
+    '''
+    elif ext == ".h5mu":
+        mdata = mu.read(path)
+        mod = list(mdata.mod.keys())[0]
+        adata = mdata.mod[mod]
+        if "cellid" not in adata.obs.columns:
+            adata.obs["cellid"] = adata.obs_names.astype(str)
+        return adata
+    '''

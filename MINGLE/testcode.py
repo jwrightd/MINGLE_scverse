@@ -1,106 +1,65 @@
 import MINGLE as mg
 import pandas as pd
 import anndata as ad
+from pathlib import Path
 
-def main():
-    file_path = r"/Volumes/data/MINGLE/Data/Intestine/05_25_huBMAP_tunit.csv"#r"/Volumes/data/MINGLE/Data/Intestine/intestine_all_information_2.csv"#
-
-    adata = mg.pp.read_file(file_path)
-
-    X = "x"
-    Y = "y"
-    reg = "unique_region"
-    cluster_col = "Cell Type"
-
-    sum_cols = list(adata.obs[cluster_col].unique())
-    keep_cols = [X, Y, reg, cluster_col]
-
-    windows = mg.tl.KNN2(adata, cluster_col=cluster_col, keep_obs_cols=keep_cols)
-
-    k = 10
-    windows2 = windows[k]
-    windows2[cluster_col] = adata.obs[cluster_col].values
-
-    adata_windows = ad.AnnData(X=None, obs=windows2.copy())
-    adata_windows.obs_names = adata_windows.obs.index.astype(str)
-
-    adata_windows.obsm[f"knn_windows_k{k}"] = adata_windows.obs[sum_cols].astype("float32").values
-    adata_windows.uns["knn_windows"] = {
-        "k": k,
-        "cols": list(sum_cols),
-        "source": "dummy-count neighborhood windows",
-    }
-
-    summary_df, per_cell_df = mg.tl.run_mingle_over_n_clusters(
-        adata=adata_windows,          # <-- AnnData in, AnnData updated in-place
-        knn_feature_cols=sum_cols,    # same as your call
-        n_range=range(1, 51),
-        return_per_cell=True,
-        plot_summary=True,
-        x_key="x",
-        y_key="y",
-        region_key="unique_region",
-    )
     
-    ll_idx, ll_n, _ = mg.tl.find_elbow_point(
-        y_values=None,
-        x_values=None,
-        adata=adata_windows,
-        uns_key="mingle_n_clusters",
-        y_key="avg_log_likelihood",
-        x_key="n_clusters",
-    )
+# ---------------------------
+# Paths
+# ---------------------------
+path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv"
+probabilities_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_all_cells_all_neighborhood_probs.csv"
 
-    prob_idx, prob_n, _ = mg.tl.find_elbow_point(
-        y_values=None,
-        x_values=None,
-        adata=adata_windows,
-        uns_key="mingle_n_clusters",
-        y_key="avg_assigned_probability",
-        x_key="n_clusters",
-    )
+out_probs_path = "local_probs_ad.csv"
+out_delta_path = "delta_probs_ad.csv"
 
-    # Step 2: Constrained plateau search (pulled from adata.uns)
-    composite_df, best_n, ranked_plateaus = mg.tl.find_best_unsupervised_plateau(
-        log_likelihoods=None,
-        assigned_probs=None,
-        elbow_min=min(ll_n, prob_n),
-        elbow_max=max(ll_n, prob_n),
-        adata=adata_windows,
-        uns_key="mingle_n_clusters",
-        ll_key="avg_log_likelihood",
-        prob_key="avg_assigned_probability",
-        out_uns_key="mingle_plateau_selection",  # optional; remove if you don't want storage
-    )
+X = 'x'
+Y = 'y'
+reg = 'region'
+cluster_col = 'Cell Type'
+cellid = 'cellid'
+neigh = 'neigh_name'
 
-    # Step 3: Plot (unchanged)
-    mg.tl.plot_stable_composite(composite_df, best_n, ll_n, prob_n)
+keep_cols = [X, Y, reg, cluster_col, cellid, neigh, path]
 
-    # Step 4: View ranked plateau table
-    print(ranked_plateaus)
+cells = mg.pp.read_file(path)
 
-    '''
-    prob_cols = [
-    'Innate Immune Enriched', 'Outer Follicle', 'Plasma Cell Enriched',
-    'Transit Amplifying Zone', 'Adaptive Immune Enriched', 'Stroma',
-    'Paneth Enriched', 'Smooth Muscle & Innate Immune', 'Mature Epithelial',
-    'Microvasculature', 'CD8+ T Enriched IEL', 'Stroma & Innate Immune',
-    'Macrovasculature', 'Innervated Stroma', 'Secretory Epithelial',
-    'Innervated Smooth Muscle', 'Smooth Muscle', 'Glandular Epithelial',
-    'CD66+ Mature Epithelial', 'Inner Follicle'
+copy_cells = cells.obs.copy()
+
+print(cells)           # AnnData summary
+print(cells.obs.head())  # show first obs rows (equivalent to your df.head())
+print(cells.obs.shape)
+
+windows = mg.tl.KNN2(
+    cells,
+    x_key=X,
+    y_key=Y,
+    region_key=reg,          # <-- use 'region'
+    cluster_col=cluster_col, # <-- use 'Cell Type'
+    keep_obs_cols=keep_cols,
+)
+
+k = 10
+windows2 = windows[k]
+windows2[cluster_col] = cells.obs[cluster_col].values
+
+cell_type_features = [
+    'Squamous Annexin A1+', 'Squamous p63+', 'Endothelial', 'Chief',
+    'Squamou p63+ EGFRhi', 'Neutrophil', 'M1 Macrophage', 'Epithelial',
+    'Stroma', 'Epithelial Ki67+ p53+', 'Endothelial CD36hi',
+    'CD4+ Treg', 'CD4+ T cell PD1+', 'CD4+ T cell', 'Nerve',
+    'CD8+ T cell', 'Epithelial MUC1+ Ki67+', 'B cell',
+    'CD8+ T cell PD1+', 'M2 Macrophage', 'Foveloar', 'Neuroendocrine',
+    'Epithelial CK7+ p53+', 'Smooth Muscle', 'Epithelial pH2AX+', 'DC',
+    'Plasma', 'Epithelial p53+', 'Endothelial aSMAhi', 'Lymphatic',
+    'Neck', 'Goblet', 'Parietal', 'Epithelial CD73hi',
+    'Foveloar Ki67+ p53+', 'Stroma CD73+', 'Goblet p53+', 'Neck p53+',
+    'Lymphatic CD73+', 'Epithelial CK7+', 'Foveloar p53+',
+    'Goblet Ki67+ p53+', 'Paneth', 'Epithelial HLADR+',
+    'Neck Ki67+ p53+'
 ]
-    #
-    G, top_pairs = mg.tl.build_neighborhood_pair_graph(
-        cells,
-        prob_cols,
-        threshold=0.25,
-        region_key="unique_region",
-        top_n=18,
-    )
-    mg.tl.plot_neighborhood_pair_graph(cells)
-    '''
 
+probabilities_df = pd.read_csv(probabilities_path)
 
-if __name__ == "__main__":
-    main()
+probs, deltas = mg.tl.crd(cells, windows2, probabilities_df, cell_type_features)
 

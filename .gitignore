@@ -23,3 +23,5 @@ __pycache__/
 /scripts/uv.lock
 MINGLE/tutorials/Edges_pl.ipynb
 MINGLE/tutorials/GMM_pl.ipynb
+
+*.csv

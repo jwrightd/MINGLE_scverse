@@ -33,6 +33,17 @@ def KNN2(
     n_neighbors = max(ks)
 
     adata = adata.copy()
+    if adata.obs.columns.has_duplicates:
+        counts = {}
+        new_cols = []
+        for c in adata.obs.columns:
+            if c not in counts:
+                counts[c] = 0
+                new_cols.append(c)
+            else:
+                counts[c] += 1
+                new_cols.append(f"{c}__dup{counts[c]}")
+        adata.obs.columns = pd.Index(new_cols)
 
     # Default keep set: keep x/y if present (without changing your logic elsewhere)
     if keep_obs_cols is None:
@@ -48,18 +59,31 @@ def KNN2(
     keep_cols_existing = [c for c in keep_cols if c in adata.obs.columns]
 
     # Dummy encode cell types (same logic)
-    dummies = pd.get_dummies(adata.obs[cluster_col])
+    # Dummy encode cell types
+    dummies = pd.get_dummies(adata.obs[cluster_col]).add_prefix(f"{cluster_col}__")
     adata.obs = pd.concat([adata.obs, dummies], axis=1)
+    print("Example dummy cols:", list(dummies.columns[:5]))
 
-    sum_cols = adata.obs[cluster_col].unique()
-    values = adata.obs[sum_cols].values
+    # Use the dummy columns as sum_cols (these ARE real columns in obs)
+    sum_cols = dummies.columns.to_numpy()
+    values = adata.obs[sum_cols].to_numpy()
+
+
 
     tissue_group = adata.obs.groupby(region_key)
     exps = list(adata.obs[region_key].unique())
 
     def get_windows(job, n_neighbors: int) -> np.ndarray:
         _start_time, _idx, tissue_name, indices = job
-        tissue = adata[adata.obs[region_key] == tissue_name]
+
+        region = adata.obs[region_key]
+        # If region_key hits duplicate columns, pandas returns a DataFrame — take the first.
+        if isinstance(region, pd.DataFrame):
+            region = region.iloc[:, 0]
+
+        mask = (region.to_numpy() == tissue_name)
+        tissue = adata[mask].copy()   # avoid AnnData view machinery
+
         coords = tissue.obs[[x_key, y_key]].values
         fit = NearestNeighbors(n_neighbors=n_neighbors).fit(coords)
         distances, neighbor_idx = fit.kneighbors(coords)
@@ -70,6 +94,7 @@ def KNN2(
 
         neighbors = tissue.obs.index.values[sorted_indices]
         return neighbors.astype(np.int32)
+
 
     tissue_chunks = [
         (time.time(), exps.index(tissue_name), tissue_name, indices)
@@ -96,7 +121,9 @@ def KNN2(
         for exp in exps:
             data, idx = out_dict[(exp, k)]
             # Keep your original behavior of indexing by idx.astype(int)
-            df_k = pd.DataFrame(data, index=idx.astype(int), columns=sum_cols)
+            pretty_cols = [c.removeprefix(f"{cluster_col}__") for c in sum_cols]
+            df_k = pd.DataFrame(data, index=idx.astype(int), columns=pretty_cols)
+
             dfs.append(df_k)
 
         window_df = pd.concat(dfs, axis=0)

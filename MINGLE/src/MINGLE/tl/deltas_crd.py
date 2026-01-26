@@ -1,415 +1,534 @@
-#Import Packages
-import pandas as pd
-import numpy as np
-
-import time
-from tqdm import tqdm
-
-from sklearn.neighbors import NearestNeighbors
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
-# Specify the path to your CSV file
-file_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv"#r"/Volumes/data/MINGLE/Esophagus/all_regions_from_h5mu.csv
-
-# Read the CSV file
-df = pd.read_csv(file_path)
-cells = df#[df['donor'] == 'B004']
-cells = cells#[cells['unique_region'] == 'B004_Ascending']
-
-copy_cells = cells.copy()
-
-# Print the shape of the DataFrame (rows, columns)
-print(cells.shape)
-
-# Optionally, to view the first few rows of the file
-print(cells.head())
-
-cells.reset_index(inplace=True, drop=True)
-print(cells)
-
-# Define column names that will be used for neighborhood analysis
-X = 'x'                  # Variable for the X coordinate
-Y = 'y'                  # Variable for the Y coordinate
-reg = 'region'         # Variable for the filename or region identifier associated with coordinates
-cluster_col = 'Cell Type'  # Variable for cell type/subtype classification
-cellid = 'cellid'
-neigh = 'neigh_name'
-path = "Path_report"
-
-# List of columns to keep for analysis
-keep_cols = [X, Y, reg, cluster_col, cellid, neigh, path]
-
-# Concatenate the original 'cells' DataFrame with dummy variables created from 'cluster_col'
-# pd.get_dummies() converts categorical variable(s) into dummy/indicator variables
-cells = pd.concat([cells, pd.get_dummies(cells[cluster_col])], axis=1)
-
-# Get unique values from the 'cluster_col' column to use for summarization
-sum_cols = cells[cluster_col].unique()
-
-# Retrieve the values for these unique categories as a NumPy array
-# This array can be used for further analysis or operations later for calculating the neighborhoods
-values = cells[sum_cols].values
-
-#We can choose a range of nearest neighbors to calculate the neighborhoods
-ks = [5,10,20] # k=5 means it collects 5 nearest neighbors for each center cell
-n_neighbors = max(ks) #sets n_neighbors to max of the list that is set
-
-# Group the cell data by region
-# 'cells' is a DataFrame containing cell data
-# 'tissue_group' will be a GroupBy object with cells grouped by the 'reg' column (representing regions)
-tissue_group = cells[[X, Y, reg]].groupby(reg)
-
-# Get a list of unique regions (filenames)
-# 'exps' will contain all unique region names found in the 'reg' column of the 'cells' DataFrame
-exps = list(cells[reg].unique())
-
-# Prepare chunks of data for processing
-# 'tissue_chunks' is a list of tuples, each tuple representing a job for processing
-# Each tuple contains the current time, index of the region in 'exps', the region name, and a subset of indices
-# 'np.array_split(indices, 1)' splits the indices for each group into chunks (1 chunk in this case)
-# This loop goes through each group in 'tissue_group', and for each group, it creates a job tuple
-tissue_chunks = [(time.time(), exps.index(t), t, a) for t, indices in tissue_group.groups.items() for a in np.array_split(indices, 1)]
-
-#Function for getting neighborhood windows
-def get_windows(job, n_neighbors):
-
-    # Unpack the job tuple containing start_time, idx, tissue_name, and indices
-    start_time, idx, tissue_name, indices = job
-
-    # Record the current time to measure the duration of the job
-    job_start = time.time()
-
-    # Print a message indicating the start of the job
-    print("Starting:", str(idx+1)+'/'+str(len(exps)), ': ' + exps[idx])
-
-    # Get the subset of the dataset for the specific tissue
-    tissue = tissue_group.get_group(tissue_name)
-
-    # Extract the coordinates (X, Y) for the points to be fitted from the tissue subset
-    to_fit = tissue.loc[indices][[X, Y]].values
-
-    # Fit the NearestNeighbors model on the tissue's X, Y coordinates
-    fit = NearestNeighbors(n_neighbors=n_neighbors).fit(tissue[[X, Y]].values)
-
-    # Find the nearest neighbors for the points in 'to_fit'
-    m = fit.kneighbors(to_fit)
-
-    # Sort the neighbors
-    # 'args' are the indices that would sort the distances
-    args = m[0].argsort(axis=1)
-
-    # 'add' is used to adjust indices for flattened array
-    add = np.arange(m[1].shape[0]) * m[1].shape[1]
-
-    # Calculate sorted indices for neighbors
-    sorted_indices = m[1].flatten()[args + add[:, None]]
-
-    # Retrieve the neighbor indices from the tissue dataset
-    neighbors = tissue.index.values[sorted_indices]
-
-    # Record the end time of the job
-    end_time = time.time()
-
-    # Print a message indicating the end of the job and the duration
-    print("Finishing:", str(idx+1)+"/"+str(len(exps)), ": "+ exps[idx], end_time - job_start, end_time - start_time)
-
-    # Return the neighbor indices as an array of integers
-    return neighbors.astype(np.int32)
-
-# Process each job to get the windows (neighbors of the cells)
-# 'tissues' is a list of results from the 'get_windows' function
-# The 'get_windows' function is applied to each job in 'tissue_chunks'
-# 'n_neighbors' is a parameter for the 'get_windows' function, defining the number of neighbors to consider
-tissues = [get_windows(job, n_neighbors) for job in tissue_chunks]
-
-
-
-# Initialize a dictionary to store the output
-out_dict = {}
-
-# Loop over a list of values 'ks' (different numbers of neighbors to consider)
-for k in ks:
-    # Iterate over each tissue's neighbors and the corresponding job information
-    for neighbors, job in zip(tissues, tissue_chunks):
-
-        # Create an array of indices for the current chunk of data
-        chunk = np.arange(len(neighbors))  # equivalent to 0, 1, 2, ..., len(neighbors)-1
-
-        # Extract the tissue name and indices from the job tuple
-        tissue_name = job[2]  # Region/filename from the job tuple
-        indices = job[3]      # Indices from the job tuple
-
-        # Compute the 'window' - a summary measure for the neighborhood of each cell up to the k-th neighbor
-        # Reshape and sum values to get a compact representation of neighborhood information
-        window = values[neighbors[chunk, :k].flatten()].reshape(len(chunk), k, len(sum_cols)).sum(axis=1)
-
-        # Store the computed window and indices in the output dictionary
-        # Keyed by a tuple of (tissue_name, k)
-        out_dict[(tissue_name, k)] = (window.astype(np.float16), indices)
-
-# Initialize a dictionary to store the final windows data
-windows = {}
-
-# Iterate over each value of k again to process the stored information
-for k in ks:
-
-    # Concatenate data for each experiment ('exp') into a DataFrame
-    # This DataFrame contains the window data for each cell, indexed by cell indices, for the current value of k
-    window = pd.concat([pd.DataFrame(out_dict[(exp, k)][0], index=out_dict[(exp, k)][1].astype(int), columns=sum_cols) for exp in exps], axis=0)
-
-    # Ensure the window data is in the same order as the original cells DataFrame
-    window = window.loc[cells.index.values]
-
-    # Concatenate the window data with the original columns specified in 'keep_cols'
-    window = pd.concat([cells[keep_cols], window], axis=1)
-
-    # Store the concatenated DataFrame in the 'windows' dictionary, keyed by the current value of k
-    windows[k] = window
-
-#Choose k value to analyze and pull out from dictionary of stored results of vectors
-k = 10
-windows2 = windows[k]
-#Add cell type column to output windows dataframe
-windows2[cluster_col] = cells[cluster_col]
-
-# List of cell type features
-cell_type_features = [
-    'Squamous Annexin A1+', 'Squamous p63+', 'Endothelial', 'Chief',
-       'Squamou p63+ EGFRhi', 'Neutrophil', 'M1 Macrophage', 'Epithelial',
-       'Stroma', 'Epithelial Ki67+ p53+', 'Endothelial CD36hi',
-       'CD4+ Treg', 'CD4+ T cell PD1+', 'CD4+ T cell', 'Nerve',
-       'CD8+ T cell', 'Epithelial MUC1+ Ki67+', 'B cell',
-       'CD8+ T cell PD1+', 'M2 Macrophage', 'Foveloar', 'Neuroendocrine',
-       'Epithelial CK7+ p53+', 'Smooth Muscle', 'Epithelial pH2AX+', 'DC',
-       'Plasma', 'Epithelial p53+', 'Endothelial aSMAhi', 'Lymphatic',
-       'Neck', 'Goblet', 'Parietal', 'Epithelial CD73hi',
-       'Foveloar Ki67+ p53+', 'Stroma CD73+', 'Goblet p53+', 'Neck p53+',
-       'Lymphatic CD73+', 'Epithelial CK7+', 'Foveloar p53+',
-       'Goblet Ki67+ p53+', 'Paneth', 'Epithelial HLADR+',
-       'Neck Ki67+ p53+'
-]
-
-probabilities_df = pd.read_csv(r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_all_cells_all_neighborhood_probs.csv")
-
-# List of all neighborhoods (column names from probabilities_df)
-neighborhoods = probabilities_df.columns.tolist()
-neighborhoods.remove('cellid')  # If 'cellid' is a column in there
-neighborhoods.remove('Unnamed: 0')
-
-# Updated GPU region-level probability computation (CuPy, log-space, robust to underflow)
-
-
-# Paths (update if needed)
-assigned_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv"
-probabilities_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_all_cells_all_neighborhood_probs.csv"
-out_probs_path = "local_probs.csv"
-out_delta_path = "delta_probs.csv"
-out_folder = Path("mingle_level_comparisons")
-out_folder.mkdir(parents=True, exist_ok=True)
-
-# Load dataframes (you can skip loading if already in memory)
-assigned_df = pd.read_csv(assigned_path).set_index("cellid")  # must contain neigh_name and region
-probabilities_df = pd.read_csv(probabilities_path)  # global probs (has 'cellid' col)
-# If you already have windows2, copy_cells, cell_type_features, neighborhoods in memory, they will be used.
-# Otherwise, ensure windows2 and copy_cells are loaded in the environment prior to running this block.
-
-# --- User: ensure these variables exist in your session ---
-# windows2: DataFrame containing cell rows with 'cellid' and 'region' columns and the feature columns in cell_type_features
-# copy_cells: DataFrame indexed the same as windows2 (or with matching index) containing 'neigh_name'
-# cell_type_features: list of feature column names (the same list you provided earlier)
-# neighborhoods: list of neighborhood names, in the same order as used in probabilities_df columns (excluding 'cellid' column)
-
-# If these are not present, try to load or recreate them before running this block.
-# Example (uncomment if you want to construct neighborhoods from probabilities_df):
-# all_cols = probabilities_df.columns.tolist()
-# if 'cellid' in all_cols: all_cols.remove('cellid')
-# neighborhoods = all_cols
-
-# Basic validation
-required_assigned_cols = {"neigh_name", "region"}
-if not required_assigned_cols.issubset(set(assigned_df.columns)):
-    raise ValueError(f"assigned_df must contain columns: {required_assigned_cols}")
-
-# Prepare storage
-all_region_probs = []
-all_region_deltas = []
-
-# Helper: stable logsumexp on cupy (fallback manual)
-def cp_logsumexp(a, axis=1, keepdims=True):
-    # a : cupy array
-    a_max = np.max(a, axis=axis, keepdims=True)
-    a_max = np.where(np.isfinite(a_max), a_max, -1e300)
-    s = np.sum(np.exp(a - a_max), axis=axis, keepdims=True)
-    s = np.where(s == 0, np.nan, s)  # avoid log(0)
-    return a_max + np.log(s)
-
-# Precompute global fallback stats for centroids (used when neighborhood has <=1 cell in region)
-# We'll compute these per-region inside the loop from df_region_centroids as in your original code,
-# but having a global fallback computed once is helpful:
-# (not strictly necessary - will be computed in loop)
-
-# Iterate regions
-unique_regions = windows2['region'].unique()
-print("Processing regions:", len(unique_regions))
-
-for region in tqdm(unique_regions, desc="Processing regions (log-space GPU)"):
-    # 1) Filter cells for this region
-    region_cells = windows2[windows2['region'] == region].copy()
-    region_cell_ids = region_cells['cellid'].values
-    # Extract feature matrix for this region (rows in same order as region_cells)
-    cell_data = region_cells[cell_type_features].copy()
-    C = cell_data.shape[0]
-    if C == 0:
-        print(f"  - Region {region}: no cells, skipping")
-        continue
-
-    # 2) Add assigned neighborhood (from your copy_cells; keep index alignment)
-    # ensure index alignment: region_cells.index corresponds to copy_cells' index in your original pipeline
-    try:
-        region_cells['neigh_name'] = copy_cells.loc[region_cells.index, 'neigh_name'].values
-    except Exception:
-        # fallback: if copy_cells indexed by cellid, map by cellid
-        if 'cellid' in copy_cells.columns:
-            mapping = copy_cells.set_index('cellid')['neigh_name'].to_dict()
-            region_cells['neigh_name'] = region_cells['cellid'].map(mapping).values
-        else:
-            raise
-
-    # 3) Build region-specific centroids for each neighborhood (as you had)
-    region_results = []
-    neigh_counts = []
-    for neighborhood in neighborhoods:
-        neighborhood_cells = region_cells[region_cells['neigh_name'] == neighborhood]
-        matching_cell_ids = neighborhood_cells.index
-        neigh_counts.append(len(matching_cell_ids))
-        stats = {"Neighborhood": neighborhood}
-        if len(matching_cell_ids) <= 1:
-            # mark zeros for now; we'll replace low-count neighborhoods with fallback after computing centroids
-            for col in cell_type_features:
-                stats[f"{col}_mean"] = np.nan
-                stats[f"{col}_std"] = np.nan
-        else:
-            for col in cell_type_features:
-                stats[f"{col}_mean"] = neighborhood_cells[col].mean()
-                std_val = neighborhood_cells[col].std(ddof=0)
-                stats[f"{col}_std"] = np.nan if pd.isna(std_val) else std_val
-        region_results.append(stats)
-
-    df_region_centroids = pd.DataFrame(region_results)  # K x (2F + 1)
-    K = df_region_centroids.shape[0]
-
-    # 3a) Compute fallback mean/std across neighborhoods in this region (ignore NaNs)
-    centroid_means = df_region_centroids[[f"{c}_mean" for c in cell_type_features]].values.astype(float)  # (K,F)
-    centroid_stds = df_region_centroids[[f"{c}_std" for c in cell_type_features]].values.astype(float)    # (K,F)
-
-    # Fallback: per-feature global mean (across neighborhoods where available) and median std (so not tiny)
-    # If a feature's median std is zero or nan, fall back to a small positive constant.
-    global_mean_fallback = np.nanmean(centroid_means, axis=0)
-    global_std_fallback = np.nanmedian(np.where(np.isnan(centroid_stds), np.nan, centroid_stds), axis=0)
-    # Safety for fallback std
-    global_std_fallback = np.where(np.isnan(global_std_fallback) | (global_std_fallback <= 0), 1e-1, global_std_fallback)
-
-    # Replace NaN means/stds for neighborhoods with <=1 cell with fallback values
-    neigh_counts = np.array(neigh_counts)
-    low_mask = neigh_counts <= 1
-    if low_mask.any():
-        centroid_means[low_mask, :] = global_mean_fallback[None, :]
-        centroid_stds[low_mask, :] = global_std_fallback[None, :]
-
-    # Final safety: ensure no zeros in stds (avoid divide by zero)
-    centroid_stds = np.where(centroid_stds <= 0, 1e-6, centroid_stds)
-
-    # 4) Move centroids and cell data to GPU (use float64 for numerical stability)
-    region_means_cp = np.array(centroid_means, dtype=np.float64)   # (K, F)
-    region_stds_cp = np.array(centroid_stds, dtype=np.float64)     # (K, F)
-    cell_array_cp = np.array(cell_data.values.astype(np.float64), dtype=np.float64)  # (C, F)
-
-    # 5) Compute log-pdf per feature on GPU using broadcasting (avoid underflow)
-    # Expand dims: X (C,1,F), M (1,K,F), S (1,K,F)
-    X = cell_array_cp[:, None, :]       # C x 1 x F
-    M = region_means_cp[None, :, :]     # 1 x K x F
-    S = region_stds_cp[None, :, :]      # 1 x K x F
-
-    # log coefficient and exponent
-    log_coeff = -0.5 * np.log(2.0 * np.pi * (S ** 2))   # C x K x F (broadcasted)
-    exponent = -0.5 * ((X - M) / S) ** 2
-    log_pdf = log_coeff + exponent   # C x K x F
-
-    # Sum log-pdf across features -> log_total (C x K)
-    log_total = np.sum(log_pdf, axis=2)  # shape (C, K)
-
-    # Normalize in log-space using stable logsumexp
-    row_logsum = cp_logsumexp(log_total, axis=1, keepdims=True)  # C x 1
-    log_prob = log_total - row_logsum  # C x K
-    probs_cp = np.exp(log_prob)        # C x K, rows should sum to 1 (or NaN if row_logsum was NaN)
-
-    # move back to numpy
-    try:
-        local_probs_np = probs_cp#.get()     # shape (C, K)
-    except Exception as e:
-        # fallback: copy in chunks if memory issue
-        local_probs_np = np.array(probs_cp)  # may still raise; usually .get() works
-
-    # Diagnostics: rows with NaN or zero sum
-    row_sums = np.nansum(local_probs_np, axis=1)
-    n_nan_rows = int(np.sum(np.isnan(row_sums)))
-    n_zero_rows = int(np.sum(np.isclose(row_sums, 0.0, atol=1e-12)))
-    print(f"Region {region}: cells={C}, NaN-sum-rows={n_nan_rows}, zero-sum-rows={n_zero_rows}")
-
-    # 6) Retrieve global probabilities for the same cells (align by cellid)
-    # Ensure probabilities_df has 'cellid' column and neighborhoods in same order
+import anndata as ad
+
+def crd(
+    cells: ad.AnnData,
+    windows2: pd.DataFrame,
+    probabilities_df: pd.DataFrame,
+    cell_type_features,
+    *,
+    out_probs_path: str = "local_probs.csv",
+    out_delta_path: str = "delta_probs.csv",
+    copy_cells: pd.DataFrame | None = None,
+):
+    """
+    crd
+
+    Compare, for each region, LOCAL (region-only) MINGLE probabilities vs GLOBAL (all-cells) MINGLE probabilities.
+
+    Inputs
+    ------
+    cells : anndata.AnnData
+        AnnData with required metadata in `.obs` including:
+        - 'cellid', 'region', 'neigh_name'
+        (and any other columns you use elsewhere).
+    windows2 : pd.DataFrame
+        Output window dataframe for a chosen k (e.g., windows[k]) containing:
+        - 'cellid', 'region', and all columns in `cell_type_features`
+        Index should align to `cells.obs.index` (same as your pipeline).
+    probabilities_df : pd.DataFrame
+        Global MINGLE probabilities computed over all cells together.
+        Must have a 'cellid' column plus neighborhood columns.
+    cell_type_features : list[str]
+        Feature columns used for likelihood computation (cell-type composition features).
+    out_probs_path : str
+        Where to save local probabilities CSV.
+    out_delta_path : str
+        Where to save delta probabilities CSV.
+    copy_cells : pd.DataFrame | None
+        If provided, used for index-aligned neigh_name assignment.
+        If None, uses cells.obs.copy().
+
+    Returns
+    -------
+    (final_probs_df, final_deltas_df) : tuple[pd.DataFrame, pd.DataFrame]
+        final_probs_df columns: neighborhoods + ['cellid','region','neigh_name']
+        final_deltas_df columns: [f"{n}_delta" ...] + ['cellid','region','neigh_name']
+    """
+    import numpy as np
+    import pandas as pd
+    from tqdm import tqdm
+
+    # neighborhoods list (same logic)
+    neighborhoods = probabilities_df.columns.tolist()
+    if 'cellid' in neighborhoods:
+        neighborhoods.remove('cellid')
+    if 'Unnamed: 0' in neighborhoods:
+        neighborhoods.remove('Unnamed: 0')
+
+    # assigned_df validation (same logic)
+    assigned_df = cells.obs.set_index("cellid")
+    required_assigned_cols = {"neigh_name", "region"}
+    if not required_assigned_cols.issubset(set(assigned_df.columns)):
+        raise ValueError(f"assigned_df must contain columns: {required_assigned_cols}")
+
+    # CPU helper: logsumexp (same logic)
+    def cp_logsumexp(a, axis=1, keepdims=True):
+        a_max = np.max(a, axis=axis, keepdims=True)
+        a_max = np.where(np.isfinite(a_max), a_max, -1e300)
+        s = np.sum(np.exp(a - a_max), axis=axis, keepdims=True)
+        s = np.where(s == 0, np.nan, s)
+        return a_max + np.log(s)
+
+    # Prepare storage (same logic)
+    all_region_probs = []
+    all_region_deltas = []
     global_idxed = probabilities_df.set_index('cellid')
-    # Some region_cell_ids might not be present in probabilities_df; select intersection
-    common_ids = [cid for cid in region_cell_ids if cid in global_idxed.index]
-    if len(common_ids) != len(region_cell_ids):
-        # create global_probs array aligned to region_cell_ids: missing -> NaN
-        global_probs = np.full((len(region_cell_ids), len(neighborhoods)), np.nan, dtype=float)
-        present_mask = [cid in global_idxed.index for cid in region_cell_ids]
-        if any(present_mask):
-            present_ids = [cid for cid, present in zip(region_cell_ids, present_mask) if present]
-            global_present_vals = global_idxed.loc[present_ids, neighborhoods].values
-            # fill into proper rows
-            for i, cid in enumerate(region_cell_ids):
-                if cid in global_idxed.index:
-                    global_probs[i, :] = global_idxed.loc[cid, neighborhoods].values
-    else:
-        global_probs = global_idxed.loc[region_cell_ids, neighborhoods].values
 
-    # 7) Build local_probs_df and save to list
-    local_probs_df = pd.DataFrame(local_probs_np, columns=neighborhoods)
-    local_probs_df['cellid'] = region_cells['cellid'].values
-    local_probs_df['region'] = region
-    local_probs_df['neigh_name'] = region_cells['neigh_name'].values
-    all_region_probs.append(local_probs_df)
+    # Use copy_cells DataFrame (obs copy) for neigh_name assignment
+    if copy_cells is None:
+        copy_cells = cells.obs.copy()
 
-    # 8) Compute delta (local - global) (per-row subtraction, NaNs propagate)
-    if global_probs.shape != local_probs_np.shape:
-        # Align shapes (global may contain NaNs for missing rows)
-        # global_probs should be same rows as region_cell_ids order
-        # if local_probs_np rows match region_cell_ids order, we can proceed; missing global rows are NaN
-        # Already handled above to create global_probs with NaNs where missing
-        pass
+    # Run loop (same logic)
+    unique_regions = windows2['region'].unique()
+    print("Processing regions:", len(unique_regions))
 
-    delta_values = local_probs_np - global_probs  # this will produce NaNs where either side is NaN
-    delta_df = pd.DataFrame(delta_values, columns=[f"{n}_delta" for n in neighborhoods])
-    delta_df["cellid"] = region_cells['cellid'].values
-    delta_df["region"] = region
-    delta_df["neigh_name"] = region_cells["neigh_name"].values
-    all_region_deltas.append(delta_df)
+    for region in tqdm(unique_regions, desc="Processing regions (CPU log-space)"):
+        region_cells = windows2[windows2['region'] == region].copy()
+        region_cell_ids = region_cells['cellid'].values
 
-# After loop: combine and save
-final_probs_df = pd.concat(all_region_probs, ignore_index=True)
-final_deltas_df = pd.concat(all_region_deltas, ignore_index=True)
+        cell_data = region_cells[cell_type_features].copy()
+        C = cell_data.shape[0]
+        if C == 0:
+            print(f"  - Region {region}: no cells, skipping")
+            continue
 
-final_probs_df.to_csv(out_probs_path, index=False)
-final_deltas_df.to_csv(out_delta_path, index=False)
+        # neigh_name assignment (same logic)
+        try:
+            region_cells['neigh_name'] = copy_cells.loc[region_cells.index, 'neigh_name'].values
+        except Exception:
+            if 'cellid' in copy_cells.columns:
+                mapping = copy_cells.set_index('cellid')['neigh_name'].to_dict()
+                region_cells['neigh_name'] = region_cells['cellid'].map(mapping).values
+            else:
+                raise
 
-print("✅ Done. Saved region-level local probs to:", out_probs_path)
-print("✅ Done. Saved region-level delta probs to:", out_delta_path)
+        # region-specific centroids (same logic)
+        region_results = []
+        neigh_counts = []
+        for neighborhood in neighborhoods:
+            neighborhood_cells = region_cells[region_cells['neigh_name'] == neighborhood]
+            matching_cell_ids = neighborhood_cells.index
+            neigh_counts.append(len(matching_cell_ids))
+            stats = {"Neighborhood": neighborhood}
 
-exit()
-# ABOVE IS FIRST PART
+            if len(matching_cell_ids) <= 1:
+                for col in cell_type_features:
+                    stats[f"{col}_mean"] = np.nan
+                    stats[f"{col}_std"] = np.nan
+            else:
+                for col in cell_type_features:
+                    stats[f"{col}_mean"] = neighborhood_cells[col].mean()
+                    std_val = neighborhood_cells[col].std(ddof=0)
+                    stats[f"{col}_std"] = np.nan if pd.isna(std_val) else std_val
 
+            region_results.append(stats)
+
+        df_region_centroids = pd.DataFrame(region_results)
+
+        centroid_means = df_region_centroids[[f"{c}_mean" for c in cell_type_features]].values.astype(float)
+        centroid_stds  = df_region_centroids[[f"{c}_std"  for c in cell_type_features]].values.astype(float)
+
+        global_mean_fallback = np.nanmean(centroid_means, axis=0)
+        global_std_fallback = np.nanmedian(np.where(np.isnan(centroid_stds), np.nan, centroid_stds), axis=0)
+        global_std_fallback = np.where(
+            np.isnan(global_std_fallback) | (global_std_fallback <= 0),
+            1e-1,
+            global_std_fallback,
+        )
+
+        neigh_counts = np.array(neigh_counts)
+        low_mask = neigh_counts <= 1
+        if low_mask.any():
+            centroid_means[low_mask, :] = global_mean_fallback[None, :]
+            centroid_stds[low_mask, :] = global_std_fallback[None, :]
+
+        centroid_stds = np.where(centroid_stds <= 0, 1e-6, centroid_stds)
+
+        region_means_cp = np.array(centroid_means, dtype=np.float64)
+        region_stds_cp  = np.array(centroid_stds,  dtype=np.float64)
+        cell_array_cp   = np.array(cell_data.values.astype(np.float64), dtype=np.float64)
+
+        Xarr = cell_array_cp[:, None, :]
+        Marr = region_means_cp[None, :, :]
+        Sarr = region_stds_cp[None, :, :]
+
+        log_coeff = -0.5 * np.log(2.0 * np.pi * (Sarr ** 2))
+        exponent  = -0.5 * ((Xarr - Marr) / Sarr) ** 2
+        log_pdf   = log_coeff + exponent
+
+        log_total = np.sum(log_pdf, axis=2)
+
+        row_logsum = cp_logsumexp(log_total, axis=1, keepdims=True)
+        log_prob   = log_total - row_logsum
+        probs_cp   = np.exp(log_prob)
+
+        local_probs_np = probs_cp
+
+        row_sums = np.nansum(local_probs_np, axis=1)
+        n_nan_rows = int(np.sum(np.isnan(row_sums)))
+        n_zero_rows = int(np.sum(np.isclose(row_sums, 0.0, atol=1e-12)))
+        print(f"Region {region}: cells={C}, NaN-sum-rows={n_nan_rows}, zero-sum-rows={n_zero_rows}")
+
+        # Global probs alignment (same logic)
+        common_ids = [cid for cid in region_cell_ids if cid in global_idxed.index]
+        if len(common_ids) != len(region_cell_ids):
+            global_probs = np.full((len(region_cell_ids), len(neighborhoods)), np.nan, dtype=float)
+            present_mask = [cid in global_idxed.index for cid in region_cell_ids]
+            if any(present_mask):
+                for i, cid in enumerate(region_cell_ids):
+                    if cid in global_idxed.index:
+                        global_probs[i, :] = global_idxed.loc[cid, neighborhoods].values
+        else:
+            global_probs = global_idxed.loc[region_cell_ids, neighborhoods].values
+
+        # Local probs df (same logic)
+        local_probs_df = pd.DataFrame(local_probs_np, columns=neighborhoods)
+        local_probs_df['cellid'] = region_cells['cellid'].values
+        local_probs_df['region'] = region
+        local_probs_df['neigh_name'] = region_cells['neigh_name'].values
+        all_region_probs.append(local_probs_df)
+
+        if global_probs.shape != local_probs_np.shape:
+            pass
+
+        delta_values = local_probs_np - global_probs
+        delta_df = pd.DataFrame(delta_values, columns=[f"{n}_delta" for n in neighborhoods])
+        delta_df["cellid"] = region_cells['cellid'].values
+        delta_df["region"] = region
+        delta_df["neigh_name"] = region_cells["neigh_name"].values
+        all_region_deltas.append(delta_df)
+
+    # Save outputs (same logic)
+    final_probs_df = pd.concat(all_region_probs, ignore_index=True)
+    final_deltas_df = pd.concat(all_region_deltas, ignore_index=True)
+
+    final_probs_df.to_csv(out_probs_path, index=False)
+    final_deltas_df.to_csv(out_delta_path, index=False)
+
+    print("✅ Done. Saved region-level local probs to:", out_probs_path)
+    print("✅ Done. Saved region-level delta probs to:", out_delta_path)
+
+    return final_probs_df, final_deltas_df
+
+def crd2(
+    *,
+    windows2: pd.DataFrame,
+    probabilities_df: pd.DataFrame,
+    assigned_df: pd.DataFrame,
+    neighborhoods: list,
+    cell_type_features: list,
+    copy_cells: pd.DataFrame,
+    out_probs_path: str = "local_probs.csv",
+    out_delta_path: str = "delta_probs.csv",
+    # PARAMETERS YOU REQUESTED (defaults preserved)
+    min_count: int = 10,
+    min_floor_abs: float = 0.05,
+    use_region_frac: float = 0.25,
+    shrink_alpha: float = 5.0,
+):
+    """
+    crd
+
+    Scverse-compatible wrapper for your region-vs-global MINGLE comparison.
+    - Accepts scverse-friendly data structures (AnnData-derived obs as DataFrames).
+    - Preserves your computation logic exactly (including diagnostics, exclusion rules, NaN semantics).
+    - Outputs:
+        local_probs.csv and delta_probs.csv (or custom paths)
+
+    Required inputs (must already exist upstream, unchanged logic):
+    - windows2: DataFrame with per-cell rows and columns:
+        ['cellid','region', (optionally 'x','y'), plus all cell_type_features, plus 'neigh_name' if present]
+      Index should align to copy_cells index OR have 'cellid' to map.
+    - probabilities_df: DataFrame with 'cellid' column + neighborhood probability columns (global MINGLE).
+    - assigned_df: DataFrame indexed by cellid with columns including 'neigh_name' and 'region'
+    - neighborhoods: ordered list of all neighborhood labels (matches probabilities_df column order, excluding 'cellid'/Unnamed)
+    - cell_type_features: list of feature columns (F features)
+    - copy_cells: DataFrame with 'neigh_name' (index-aligned to windows2 OR has 'cellid' for mapping)
+
+    Returns
+    -------
+    (final_probs_df, final_deltas_df) : tuple[pd.DataFrame, pd.DataFrame]
+    """
+    # Updated GPU region-level probability computation (CuPy-like, log-space, robust to underflow)
+    # NOTE: to keep scverse-compat and avoid GPU hard-deps, we use numpy as `cp` exactly as you wrote.
+    import numpy as np
+    import pandas as pd
+    import numpy as cp
+    from tqdm import tqdm
+
+    # small alias used in diagnostics
+    _np = np
+
+    # Basic validation (unchanged)
+    required_assigned_cols = {"neigh_name", "region"}
+    if not required_assigned_cols.issubset(set(assigned_df.columns)):
+        raise ValueError(f"assigned_df must contain columns: {required_assigned_cols}")
+
+    # Sanitizer utility (define once) (unchanged)
+    def sanitize_centroids(means, stds, counts, region_cells,
+                           min_floor_abs=min_floor_abs, use_region_frac=use_region_frac, shrink_alpha=shrink_alpha):
+        K, F = means.shape
+
+        region_mean = np.nanmean(means, axis=0) if np.any(np.isfinite(means)) else np.zeros(F, dtype=float)
+        region_std  = np.nanstd(region_cells[cell_type_features].values.astype(float), axis=0, ddof=1)
+        region_std  = np.where(np.isnan(region_std) | (region_std <= 0), 0.1, region_std)
+        min_std_vec = np.maximum(region_std * use_region_frac, min_floor_abs)
+
+        means_clean = np.where(np.isfinite(means), means, region_mean[None, :])
+
+        stds_clean = np.where(np.isfinite(stds), stds, min_std_vec[None, :])
+        stds_clean = np.maximum(stds_clean, min_std_vec[None, :])
+
+        n = counts.astype(float) + 1e-8
+        neigh_var = stds_clean ** 2
+        region_var = (region_std ** 2)[None, :]
+        combined_var = (n[:, None] * neigh_var + shrink_alpha * region_var) / (n[:, None] + shrink_alpha)
+        stds_shrunk = np.sqrt(np.maximum(combined_var, min_std_vec[None, :]**2))
+        stds_shrunk = np.maximum(stds_shrunk, min_std_vec[None, :])
+
+        return means_clean, stds_shrunk
+
+    # Helper: stable logsumexp on cupy (here cp==numpy) (unchanged)
+    def cp_logsumexp(a, axis=1, keepdims=True):
+        a_max = cp.max(a, axis=axis, keepdims=True)
+        a_max = cp.where(cp.isfinite(a_max), a_max, -1e300)
+        s = cp.sum(cp.exp(a - a_max), axis=axis, keepdims=True)
+        s = cp.where(s == 0, cp.nan, s)
+        return a_max + cp.log(s)
+
+    # Prepare storage (unchanged)
+    all_region_probs = []
+    all_region_deltas = []
+
+    unique_regions = windows2['region'].unique()
+    print("Processing regions:", len(unique_regions))
+
+    for region in tqdm(unique_regions, desc="Processing regions (log-space GPU)"):
+        # 1) Filter cells for this region (unchanged)
+        region_cells = windows2[windows2['region'] == region].copy()
+        region_cell_ids = region_cells['cellid'].values
+        cell_data = region_cells[cell_type_features].copy()
+        C = cell_data.shape[0]
+        if C == 0:
+            print(f"  - Region {region}: no cells, skipping")
+            continue
+
+        # Replace infinities in raw cell_data (unchanged)
+        cell_data = cell_data.replace([np.inf, -np.inf], np.nan)
+
+        # 2) Add assigned neighborhood (unchanged)
+        try:
+            region_cells['neigh_name'] = copy_cells.loc[region_cells.index, 'neigh_name'].values
+        except Exception:
+            if 'cellid' in copy_cells.columns:
+                mapping = copy_cells.set_index('cellid')['neigh_name'].to_dict()
+                region_cells['neigh_name'] = region_cells['cellid'].map(mapping).values
+            else:
+                raise
+
+        # 3) Build region-specific centroids (unchanged)
+        region_results = []
+        neigh_counts = []
+        for neighborhood in neighborhoods:
+            neighborhood_cells = region_cells[region_cells['neigh_name'] == neighborhood]
+            matching_cell_ids = neighborhood_cells.index
+            neigh_counts.append(len(matching_cell_ids))
+            stats = {"Neighborhood": neighborhood}
+            if len(matching_cell_ids) <= 1:
+                for col in cell_type_features:
+                    stats[f"{col}_mean"] = np.nan
+                    stats[f"{col}_std"] = np.nan
+            else:
+                for col in cell_type_features:
+                    stats[f"{col}_mean"] = neighborhood_cells[col].mean()
+                    std_val = neighborhood_cells[col].std(ddof=0)
+                    stats[f"{col}_std"] = np.nan if pd.isna(std_val) else std_val
+            region_results.append(stats)
+
+        df_region_centroids = pd.DataFrame(region_results)
+        K = df_region_centroids.shape[0]
+
+        centroid_means = df_region_centroids[[f"{c}_mean" for c in cell_type_features]].values.astype(float)
+        centroid_stds  = df_region_centroids[[f"{c}_std"  for c in cell_type_features]].values.astype(float)
+        counts = np.array(neigh_counts, dtype=int)
+
+        # DIAGNOSTICS (unchanged)
+        neigh_counts_arr = _np.array(neigh_counts)
+        flat_stds = centroid_stds.flatten()
+        pct = lambda q: float(_np.nanpercentile(flat_stds, q))
+        print(f"  Region '{region}': cell_count={C}, neighborhoods={K}")
+        print(f"   neigh_counts: min={neigh_counts_arr.min()}, median={_np.median(neigh_counts_arr)}, max={neigh_counts_arr.max()}")
+        print("   centroid std percentiles (1,5,25,50,75,95,99,100):",
+              pct(1), pct(5), pct(25), pct(50), pct(75), pct(95), pct(99), _np.nanmax(flat_stds))
+        small_frac = float(_np.nanmean(flat_stds <= 1e-3))
+        print(f"   fraction of centroid stds <= 1e-3: {small_frac:.3f}")
+
+        # SANITIZE (unchanged)
+        means_clean, stds_shrunk = sanitize_centroids(
+            centroid_means.copy(), centroid_stds.copy(), counts, region_cells,
+            min_floor_abs=min_floor_abs, use_region_frac=use_region_frac, shrink_alpha=shrink_alpha
+        )
+
+        # Exclude neighborhoods with too few cells (unchanged)
+        low_mask = counts < min_count
+        if low_mask.any():
+            means_clean[low_mask, :] = np.nan
+            stds_shrunk[low_mask, :] = np.nan
+
+        # Region-level fallbacks (unchanged)
+        region_mean  = np.nanmean(means_clean, axis=0)
+        alt_region_mean = np.nanmean(cell_data.values.astype(float), axis=0)
+        region_mean = np.where(np.isfinite(region_mean), region_mean,
+                               np.where(np.isfinite(alt_region_mean), alt_region_mean, 0.0))
+
+        region_std  = np.nanstd(cell_data.values.astype(float), axis=0, ddof=1)
+        region_std  = np.where(np.isnan(region_std) | (region_std <= 0), 0.1, region_std)
+        min_std_vec = np.maximum(region_std * use_region_frac, min_floor_abs)
+
+        compute_means = np.where(np.isfinite(means_clean), means_clean, region_mean[None, :])
+        compute_stds  = np.where(np.isfinite(stds_shrunk), stds_shrunk, min_std_vec[None, :])
+
+        counts = np.array(neigh_counts, dtype=int)
+        count_mask = counts >= min_count
+        finite_mask = np.all(np.isfinite(compute_means) & np.isfinite(compute_stds), axis=1)
+        valid_mask = count_mask & finite_mask
+
+        valid_idx = np.where(valid_mask)[0]
+        invalid_idx = np.where(~valid_mask)[0]
+
+        K_full = len(neighborhoods)
+
+        # If none valid (unchanged)
+        if valid_idx.size == 0:
+            local_probs_np = np.full((C, K_full), np.nan, dtype=float)
+            print(f"  Region {region}: NO valid neighborhoods (all excluded) -> local_probs all NaN")
+        else:
+            means_valid = compute_means[valid_idx, :]
+            stds_valid  = compute_stds[valid_idx, :]
+
+            if not (np.isfinite(means_valid).all() and np.isfinite(stds_valid).all()):
+                local_probs_np = np.full((C, K_full), np.nan, dtype=float)
+                print(f"  Region {region}: unexpected non-finite in valid subset -> skipping GPU for safety")
+            else:
+                # "GPU" arrays (cp == numpy here; unchanged structure)
+                region_means_cp = cp.asarray(means_valid, dtype=cp.float64)
+                region_stds_cp  = cp.asarray(stds_valid, dtype=cp.float64)
+                cell_array_cp   = cp.asarray(cell_data.values.astype(np.float64), dtype=cp.float64)
+
+                X = cell_array_cp[:, None, :]
+                M = region_means_cp[None, :, :]
+                S = region_stds_cp[None, :, :]
+
+                log_coeff = -0.5 * cp.log(2.0 * cp.pi * (S ** 2))
+                exponent = -0.5 * ((X - M) / S) ** 2
+                log_pdf = log_coeff + exponent
+
+                log_total = cp.sum(log_pdf, axis=2)
+
+                row_logsum = cp_logsumexp(log_total, axis=1, keepdims=True)
+                log_prob_valid = log_total - row_logsum
+                probs_valid_cp = cp.exp(log_prob_valid)
+
+                try:
+                    probs_valid = probs_valid_cp.get()
+                except Exception:
+                    probs_valid = np.array(probs_valid_cp)
+
+                local_probs_np = np.full((C, K_full), np.nan, dtype=float)
+                local_probs_np[:, valid_idx] = probs_valid
+
+                if invalid_idx.size:
+                    local_probs_np[:, invalid_idx] = np.nan
+
+                del region_means_cp, region_stds_cp, cell_array_cp, X, M, S, log_pdf, log_total, row_logsum, log_prob_valid, probs_valid_cp
+                try:
+                    cp._default_memory_pool.free_all_blocks()
+                except Exception:
+                    pass
+
+        # Diagnostics (unchanged)
+        rows_all_nan = np.all(np.isnan(local_probs_np), axis=1)
+        row_sums = np.nansum(local_probs_np, axis=1)
+        n_all_nan_rows = int(rows_all_nan.sum())
+        n_zero_rows = int(((~rows_all_nan) & np.isclose(row_sums, 0.0, atol=1e-12)).sum())
+        print(f"  Region {region}: cells={C}, rows_all_nan={n_all_nan_rows}, zero-sum-rows={n_zero_rows}")
+
+        col_to_idx = {col: i for i, col in enumerate(neighborhoods)}
+        assigned_idx = [col_to_idx.get(n, None) for n in region_cells['neigh_name'].values]
+        assigned_idx_arr = _np.array([i if i is not None else -1 for i in assigned_idx], dtype=int)
+
+        assigned_probs = _np.full(len(local_probs_np), _np.nan)
+        valid_rows = assigned_idx_arr >= 0
+        if valid_rows.any():
+            assigned_probs[valid_rows] = local_probs_np[valid_rows, assigned_idx_arr[valid_rows]]
+
+        print("  assigned-prob: mean, median, min, max:",
+              _np.nanmean(assigned_probs), _np.nanmedian(assigned_probs),
+              _np.nanmin(assigned_probs), _np.nanmax(assigned_probs))
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            p = local_probs_np.copy()
+            p = np.where((p >= 0) & np.isfinite(p), p, 0.0)
+            mask = p > 0.0
+            ent = -np.nansum(p * np.log2(np.where(mask, p, 1.0)), axis=1)
+            ent[rows_all_nan] = np.nan
+
+        print("  entropy (bits) mean/median/min/max:",
+              _np.nanmean(ent), _np.nanmedian(ent), _np.nanmin(ent), _np.nanmax(ent))
+
+        low_count_neighs = [neigh for neigh, cnt in zip(neighborhoods, neigh_counts) if cnt <= 1]
+        if len(low_count_neighs) > 0:
+            print(f"  neighborhoods with <=1 cell in region: {len(low_count_neighs)} (examples):", low_count_neighs[:6])
+
+        # 6) Retrieve global probabilities (unchanged)
+        global_idxed = probabilities_df.set_index('cellid')
+        common_ids = [cid for cid in region_cell_ids if cid in global_idxed.index]
+        if len(common_ids) != len(region_cell_ids):
+            global_probs = np.full((len(region_cell_ids), K_full), np.nan, dtype=float)
+            present_mask = [cid in global_idxed.index for cid in region_cell_ids]
+            if any(present_mask):
+                for i, cid in enumerate(region_cell_ids):
+                    if cid in global_idxed.index:
+                        global_probs[i, :] = global_idxed.loc[cid, neighborhoods].values
+        else:
+            global_probs = global_idxed.loc[region_cell_ids, neighborhoods].values
+
+        # Prepare x/y for output (unchanged)
+        x_vals = region_cells.get('x', region_cells.get('X', np.nan))
+        y_vals = region_cells.get('y', region_cells.get('Y', np.nan))
+
+        # 7) local probs df (unchanged)
+        local_probs_df = pd.DataFrame(local_probs_np, columns=neighborhoods)
+        local_probs_df['cellid'] = region_cells['cellid'].values
+        local_probs_df['region'] = region
+        local_probs_df['neigh_name'] = region_cells['neigh_name'].values
+        local_probs_df['x'] = np.array(x_vals)
+        local_probs_df['y'] = np.array(y_vals)
+        all_region_probs.append(local_probs_df)
+
+        # 8) delta df (unchanged)
+        delta_values = local_probs_np - global_probs
+        delta_df = pd.DataFrame(delta_values, columns=[f"{n}_delta" for n in neighborhoods])
+        delta_df["cellid"] = region_cells['cellid'].values
+        delta_df["region"] = region
+        delta_df["neigh_name"] = region_cells["neigh_name"].values
+        delta_df['x'] = np.array(x_vals)
+        delta_df['y'] = np.array(y_vals)
+        all_region_deltas.append(delta_df)
+
+    # After loop: combine and save (unchanged)
+    final_probs_df = pd.concat(all_region_probs, ignore_index=True)
+    final_deltas_df = pd.concat(all_region_deltas, ignore_index=True)
+
+    final_probs_df.to_csv(out_probs_path, index=False)
+    final_deltas_df.to_csv(out_delta_path, index=False)
+
+    print("✅ Done. Saved region-level local probs to:", out_probs_path)
+    print("✅ Done. Saved region-level delta probs to:", out_delta_path)
+
+    return final_probs_df, final_deltas_df

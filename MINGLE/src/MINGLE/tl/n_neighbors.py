@@ -9,8 +9,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import MiniBatchKMeans
 import matplotlib.pyplot as plt
 import anndata as ad
-from MINGLE.pp import read_file
-from MINGLE.tl import KNN2
 
 def run_mingle_over_n_clusters(
     adata,

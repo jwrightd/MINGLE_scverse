@@ -41,12 +41,12 @@ def rnd(
     dysplasia_regions: Optional[Iterable[str]] = None,
     unknown_label: str = "Unknown",
     # sizing
-    min_area: float = 12.5,
-    max_area: float = 500.0,
+    min_area: float = 40.0,
+    max_area: float = 1200.0,
     orig_fig_width: float = 36.0,
-    new_fig_width: float = 18.0,
-    fig_height: float = 20.0,
-    dpi: int = 75,
+    new_fig_width: float =30.0,
+    fig_height: float = 24.0,
+    dpi: int = 35,
     # colormap
     cmap_name: str = "vlag",
     # legend
@@ -232,10 +232,14 @@ def rnd(
     # =========================
     # MAIN DOT + BAR PLOT
     # =========================
-    marker_scale = (orig_fig_width / new_fig_width) ** 2
+    marker_scale = 1#(orig_fig_width / new_fig_width) ** 2
 
     plt.close("all")
     fig, ax = plt.subplots(figsize=(new_fig_width, fig_height), dpi=dpi)
+    fig.subplots_adjust(right=0.80)
+    fig.subplots_adjust(bottom=0.25)
+    pos = ax.get_position()
+    ax_bar = fig.add_axes([0.82, pos.y0, 0.16, pos.height])  # fixed right panel
 
     ax.scatter(
         plot_df["x"], plot_df["y"],
@@ -246,7 +250,7 @@ def rnd(
     )
 
     ax.set_xticks(range(len(neighborhood_order)))
-    ax.set_xticklabels(neighborhood_order, rotation=90, fontsize=25)
+    ax.set_xticklabels(neighborhood_order, rotation=90, fontsize=20)
     ax.set_yticks(range(len(region_order)))
     ax.set_yticklabels(region_order, fontsize=25)
 
@@ -279,8 +283,8 @@ def rnd(
     ax_bar.set_ylim(-0.5, n_rows - 0.5)
     ax_bar.invert_yaxis()
     ax_bar.set_yticks([])
-    ax_bar.set_xlabel("Sum |Mean Δ|", fontsize=25)
-    ax_bar.tick_params(axis="x", labelsize=25)
+    ax_bar.set_xlabel("Sum |Mean Δ|", fontsize=32)
+    ax_bar.tick_params(axis="x", labelsize=30)
 
     for s in ax_bar.spines.values():
         s.set_visible(False)
@@ -327,9 +331,3 @@ def rnd(
         plt.show()
 
     return fig, ax, fig_cb, plot_df
-
-
-
-fig, ax, fig_cb, plot_df = rnd(
-    r"/Volumes/data/MINGLE/Data/Esophagus/20251217_all_regions_delta_probs.csv"
-)

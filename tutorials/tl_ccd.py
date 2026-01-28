@@ -1,7 +1,30 @@
 import MINGLE as mg
 
-file_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv"
-df = mg.tl.read_file(file_path)
+adata, combined_melted, combo_counts = mg.tl.ccd(
+    cells_path=r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv",
+    probs_paths={
+        "combined": r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_all_cells_all_neighborhood_probs.csv",
+        "tumor": r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_tumor_all_cells_all_neighborhood_probs.csv",
+        "normal": r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_normal_all_cells_all_neighborhood_probs.csv",
+        "metaplasia": r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_metaplasia_all_cells_all_neighborhood_probs.csv",
+        "dysplasia": r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_dysplasia_all_cells_all_neighborhood_probs.csv",
+    },
+    pp=mg.pp,          
+    cellid_key="cellid",
+    assigned_neigh_key="neigh_name",
+    min_count=10,
+    save_deltas=False,     # True if you want the per-context delta CSVs too
+    out_dir=None,
+    out_prefix=None
+)
+
+print(adata)
+print("Layers:", list(adata.layers.keys()))
+print("combined_melted:", combined_melted.shape)
+
+# BELOW IS FROM gvs_pl.py
+
+
 epithelial_cell_types = [
  'Squamous Annexin A1+','Squamous p63+','Squamou p63+ EGFRhi','Epithelial',
  'Epithelial Ki67+ p53+','Epithelial MUC1+ Ki67+','Epithelial CK7+ p53+',
@@ -20,11 +43,13 @@ immune_cell_types = [
  'Neutrophil','M1 Macrophage','M2 Macrophage','CD4+ Treg','CD4+ T cell PD1+',
  'CD4+ T cell','CD8+ T cell','CD8+ T cell PD1+','B cell','Plasma','DC'
 ]
+
 bucket_map = {
     "Epithelial": epithelial_cell_types,
     "Mesenchymal": mesenchymal_cell_types,
     "Immune": immune_cell_types
 }
+
 cell_type_color_map = {
   "B cell": "#00ff00",
   "CD4+ T cell": "#ff00ff",
@@ -72,34 +97,64 @@ cell_type_color_map = {
   "Stroma": "#f3c0fb",
   "Stroma CD73+": "#be68b5"
 }
-plot_df = mg.pl.plot_log2fc_vs_mean_abundance(
-    df,
+
+
+mg.pl.plot_global_vs_subset_horizontal_buckets(
+    data=adata,
     neighborhood="Mature Intestinal and Immune",
     bucket_map=bucket_map,
     cell_type_color_map=cell_type_color_map,
     min_count=10,
     subset_region="E19_reg003",
-    color_by_bucket=False,
-    annotate_sectors=True,          # annotate top-left & top-right sectors
-    fc_threshold=1.0,               # vertical boundary at ±1 (2×)
-    abundance_threshold_pct=1.0,    # horizontal boundary at 1% mean abundance
-    fontsize=25,
-    size_scale=800,
-    min_marker_size=100
+    figsize=(11, 3)
 )
 
-plot_df = mg.pl.plot_log2fc_vs_mean_abundance(
-    df,
-    neighborhood="Mature Intestinal and Immune",
+mg.pl.plot_global_vs_subset_horizontal_buckets(
+    data=adata,
+    neighborhood="Vasculature",
     bucket_map=bucket_map,
     cell_type_color_map=cell_type_color_map,
     min_count=10,
-    subset_patient="E19",
-    color_by_bucket=False,
-    annotate_sectors=True,          # annotate top-left & top-right sectors
-    fc_threshold=1.0,               # vertical boundary at ±1 (2×)
-    abundance_threshold_pct=1.0,    # horizontal boundary at 1% mean abundance
-    fontsize=25,
-    size_scale=800,
-    min_marker_size=100
+    subset_region="E08_reg003",
+    figsize=(10, 3)
+)
+
+mg.pl.plot_global_vs_subset_horizontal_buckets(
+    data=adata,
+    neighborhood="Vasculature",
+    bucket_map=bucket_map,
+    cell_type_color_map=cell_type_color_map,
+    min_count=10,
+    subset_patient="E08",
+    figsize=(10, 3)
+)
+
+mg.pl.plot_global_vs_subset_horizontal_buckets(
+    data=adata,
+    neighborhood="Ki67hi p53hi Epithelial and Innate Immune",
+    bucket_map=bucket_map,
+    cell_type_color_map=cell_type_color_map,
+    min_count=10,
+    subset_region="E17_reg005",
+    figsize=(10, 3)
+)
+# updated ipynb
+
+# Choose ONE neighborhood and ONE context
+neighborhood_name = "Mature Intestinal and Immune"
+context_name = "Tumor"
+
+# Minimum number of cells required to be plotted
+min_cells = 10
+
+mg.pl.plot_global_vs_subset_horizontal_buckets(
+    data=adata,
+    neighborhood=neighborhood_name,
+    subset_context=context_name,
+    bucket_map=bucket_map,
+    cell_type_color_map=cell_type_color_map,
+    min_count=min_cells,
+    figsize=(10, 3),
+    title_fontsize=25,
+    label_fontsize=25
 )

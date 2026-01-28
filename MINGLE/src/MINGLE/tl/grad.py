@@ -1,11 +1,13 @@
-#Import Packages
-import pandas as pd
 import numpy as np
+import pandas as pd
+import anndata as ad
 from sklearn.neighbors import NearestNeighbors
+from sklearn.cluster import MiniBatchKMeans
 import time
-import sys
 
-
+# =========================
+# (A) Your Neighborhoods class, but AnnData/scverse-compatible wrapper
+# =========================
 
 class Neighborhoods(object):
     def __init__(self, cells,ks,cluster_col,sum_cols,keep_cols,neigh,X='X:X',Y = 'Y:Y',reg = 'Exp',add_dummies = True):
@@ -122,65 +124,8 @@ class Neighborhoods(object):
             window = pd.concat([self.cells[self.keep_cols],window],axis=1)
             windows[k] = window
         return windows
-
-
-
-import pandas as pd
-import seaborn as sns
-import numpy as np
-from scipy.stats import norm
-
-import time
-import sys
-import matplotlib.pyplot as plt
-import math
-import os
-
-from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
-
-probabilities_df = pd.read_csv(r"/Volumes/data/MINGLE/Data/Intestine/intestine_tissueunit_all_cells_all_neighborhood_probs.csv")
-allinfo_df = pd.read_csv(r"/Volumes/data/MINGLE/Data/Intestine/intestine_all_information_2.csv")
-
-# Define units of interest
-tu1 = "Inner Follicle"
-tu2 = "Outer Follicle"
-
-# Additional columns needed downstream
-extra_cols = ['x','y','unique_region','Neighborhood','Cell Type','Tissue Unit','Community']
-
-# Create new dataframe
-df2 = allinfo_df[[tu1, tu2] + extra_cols].copy()
-
-import numpy as np
-
-# ratio with small constant to avoid division by zero
-eps = 1e-9
-df2["ratio"] = (df2[tu1] + eps) / (df2[tu2] + eps)
-
-# log ratio
-df2["log_ratio"] = np.log(df2["ratio"])
-
-# max probability
-df2["max_prob"] = df2[[tu1, tu2]].max(axis=1)
-
-# final score
-df2["Score"] = df2["log_ratio"] * df2["max_prob"]
-import numpy as np
-import pandas as pd
-
-def assign_probability_level_with_edges(series,
-                                        n_bins=5,
-                                        labels=None,
-                                        use_quantiles=True):
-    """
-    Same as before, but now RETURNS:
-      - categories (pd.Categorical)
-      - bin edges actually used (np.ndarray)
-    and PRINTS them clearly.
-    """
+    
+def assign_probability_level_with_edges(series, n_bins=5, labels=None, use_quantiles=True):
     if labels is None:
         labels = ["Very Low", "Low", "Medium", "High", "Very High"]
     labels = list(labels)
@@ -189,236 +134,226 @@ def assign_probability_level_with_edges(series,
     vmin = float(s.min())
     vmax = float(s.max())
 
-    # Case: constant series
     if np.isclose(vmin, vmax):
-        print("All Score values are identical → single bin.")
-        print("Bin edges = [vmin, vmax] =", [vmin, vmax])
         cat = pd.Series(["Medium"] * len(series), index=series.index)
         return cat.astype(pd.CategoricalDtype(categories=labels, ordered=True)), np.array([vmin, vmax])
 
-    # === Try quantiles first ===
     if use_quantiles:
         try:
             cat = pd.qcut(series, q=n_bins, labels=labels, duplicates="raise")
-            # If this succeeded, we can extract quantile edges
-            edges = series.quantile(np.linspace(0,1,n_bins+1)).values
-            print("Used quantile bins:")
-            print("Quantile edges:", edges)
+            edges = series.quantile(np.linspace(0, 1, n_bins + 1)).values
             return cat, edges
         except ValueError:
-            print("Quantile binning failed (duplicate edges). Falling back to equal-width bins.")
+            pass
 
-    # === Fallback: equal-width bins ===
-    edges = np.linspace(vmin, vmax, n_bins + 1)
-
-    # Ensure unique edges (should be unless precision issues)
-    unique_edges = np.unique(edges)
-    if len(unique_edges) < len(edges):
-        print("Warning: equal-width bin edges collapsed due to precision. Unique edges =", unique_edges)
-    else:
-        print("Using equal-width bins:")
-        print("Equal-width edges:", unique_edges)
-
-    # Assign bins
-    labels_use = labels[: len(unique_edges) - 1]
-    cat = pd.cut(series, bins=unique_edges, labels=labels_use, include_lowest=True)
-
-    return cat, unique_edges
+    edges = np.unique(np.linspace(vmin, vmax, n_bins + 1))
+    labels_use = labels[: len(edges) - 1]
+    cat = pd.cut(series, bins=edges, labels=labels_use, include_lowest=True)
+    return cat, edges
 
 
-# ------------------ Example on df2 ------------------
-df2 = df2.copy()
-df2["Probability_Level"], edges_used = assign_probability_level_with_edges(df2["Score"], n_bins=5)
-
-print("\nFinal bin edges actually used:\n", edges_used)
-print("\nCounts per level:\n", df2["Probability_Level"].value_counts(dropna=False))
-
-df = df2.copy()
-df.reset_index(inplace=True, drop=True)
-
-# Define column names that will be used for neighborhood analysis
-ks = [10,20,30,50,100]  # k=5 means it collects 5 nearest neighbors for each center cell
-X = 'x'                  # Variable for the X coordinate
-Y = 'y'                  # Variable for the Y coordinate
-reg = 'unique_region'         # Variable for the filename or region identifier associated with coordinates
-neigh = 'Neighborhood'      # Variable for the neighborhood assignemnt of the cell
-cluster_col = 'Probability_Level'  # Variable for cell type/subtype classification
-celltype = 'Cell Type'
-tiss = 'Tissue Unit'
-comm = 'Community'
-sum_cols = list(df[cluster_col].unique())
-# List of columns to keep for analysis
-keep_cols = [X, Y, reg, neigh, celltype, comm, tiss, cluster_col]
-
-#Run neighborhood analysis function with radial distance threshold
-Neigh = Neighborhoods(df,ks = ks,cluster_col = cluster_col,
-                      sum_cols=sum_cols,reg=reg,
-                      keep_cols=keep_cols,neigh=neigh, X = X,Y=Y, add_dummies=True)
-cluster_name_windows = Neigh.k_windows(distance_max=1000) #Distance threshold for cell neighborhoods in terms of pixels conservative of 100 um
-
-# --- CONCATENATE DUMMIES (unchanged) ---
-# Concatenate the original 'cells' DataFrame with dummy variables created from 'cluster_col'
-# pd.get_dummies() converts categorical variable(s) into dummy/indicator variables
-df = pd.concat([df, pd.get_dummies(df[cluster_col], dtype=int)], axis=1)
-
-# --- FIX: use the dummy column names as the summary columns (was previously using unique category values) ---
-sum_cols2 = pd.get_dummies(df[cluster_col], dtype=int).columns.tolist()
-
-# Retrieve the values for these dummy categories as a NumPy array
-values = df[sum_cols2].values
-
-#Choose k value to analyze and pull out from dictionary of stored results of vectors
-k = 20
-clusters = 5
-windows2 = cluster_name_windows[k]
-#Add cell type column to output windows dataframe
-windows2[cluster_col] = df[cluster_col]
-
-#Fill in based on above for the number of clusters you want
-n_neighborhoods = clusters
-
-#return a name of the column for storing the clusters
-neighborhood_name = "neighborhood"+str(k)
-
-# Initialize a dictionary to store the centroids for each value of 'k'
-k_centroids = {}
-
-# ----------------- NEW: filter to target neighborhoods BEFORE clustering -----------------
-target_neighborhoods = ['Inner Follicle','Outer Follicle']
-
-# windows2 and df should be index-aligned; if not but same length, reset indices to align
-if not windows2.index.equals(df.index):
-    if len(windows2) == len(df):
-        windows2 = windows2.reset_index(drop=True)
-        df = df.reset_index(drop=True)
-    else:
-        # If lengths differ, user must align windows2 and df appropriately; raise explicit error
-        raise ValueError("windows2 and df indices differ and lengths differ; align them before filtering.")
-
-# create a boolean mask for the target neighborhoods
-mask = df['Neighborhood'].isin(target_neighborhoods)
-
-# filter windows2 and df to only the rows corresponding to the target neighborhoods
-windows2_sub = windows2.loc[mask].copy()
-df_sub = df.loc[mask].copy()
-
-# Initialize a MiniBatchKMeans clustering model
-# 'n_clusters' is set to 'n_neighborhoods', which is the desired number of clusters
-# 'random_state=0' ensures reproducibility of the results
-km = MiniBatchKMeans(n_clusters=n_neighborhoods, random_state=0)
-
-# Prepare features to feed into KMeans. Prefer windows2_sub one-hot columns if available; otherwise use df_sub dummies
-if set(sum_cols2).issubset(windows2_sub.columns):
-    feature_matrix = windows2_sub[sum_cols2].values
-else:
-    feature_matrix = df_sub[sum_cols2].values
-
-# Perform clustering on the data in the filtered windows2_sub using the columns specified in 'sum_cols2'
-# '.values' converts the DataFrame to a NumPy array, which is the input format for KMeans
-labels_sub = km.fit_predict(feature_matrix)
-
-# Store the centroids of the clusters in the 'k_centroids' dictionary, keyed by 'k'
-k_centroids[k] = km.cluster_centers_
-
-# Add the cluster labels to the filtered dataframe (df_sub) only
-df_sub[neighborhood_name] = labels_sub
-
-# If you want to keep a full-length column in df, but avoid mismatches, fill with -1 for non-subset rows
-df[neighborhood_name] = -1
-df.loc[mask, neighborhood_name] = labels_sub
-
-# Select the centroids for a specific value of 'k' for plotting
-k_to_plot = k
-niche_clusters = (k_centroids[k_to_plot])
-
-# Calculate the average cell types across the subset values array (use subset so baseline is Inner+Outer Follicle)
-values_sub = df_sub[sum_cols2].values
-tissue_avgs = values_sub.mean(axis=0)
-
-# Compute fold change (fc) of cell types abundance within a neighborhood versus that in the tissue
-# This involves a log2 transformation of the ratio of (niche_clusters + tissue_avgs) to tissue_avgs
-# The ratio is normalized by the sum across each row (axis=1), ensuring that the sum of ratios for each row is 1
-eps = 1e-12
-tissue_row = tissue_avgs.reshape(1, -1)
-niche_plus = niche_clusters + tissue_row
-row_sums = niche_plus.sum(axis=1, keepdims=True)
-norm = niche_plus / (row_sums + eps)
-fc_array = np.log2((norm + eps) / (tissue_row + eps))
-
-# Convert the fold change array into a pandas DataFrame for each cell type
-fc = pd.DataFrame(fc_array, columns=sum_cols2)
-
-# --------------------------
-# *** MINIMAL CHANGE: ORDER ROWS (by high-bin enrichment) AND COLUMNS (highest->lowest) DYNAMICALLY ***
-# --------------------------
-
-import re
-
-def col_score(lbl):
+def _col_score(lbl: str) -> float:
+    import re
     s = str(lbl).strip().lower()
-
-    # specific exact/phrase matches first (VERY important: very-low/high before low/high)
-    if s == 'very high' or 'very high' in s:
+    if s == "very high" or "very high" in s:
         return 10000.0
-    if s == 'high' or s.endswith(' high') or s.startswith('high'):
+    if s == "high" or s.endswith(" high") or s.startswith("high"):
         return 8000.0
-    if s == 'medium' or 'medium' in s or s == 'med':
+    if s == "medium" or "medium" in s or s == "med":
         return 5000.0
-    if s == 'low' and 'very' not in s:   # exact low (not 'very low')
+    if s == "low" and "very" not in s:
         return 2000.0
-    if s == 'very low' or 'very low' in s:
+    if s == "very low" or "very low" in s:
         return 100.0
 
-    # Bin_# or Bin #
-    m = re.search(r'bin[_\s]*(\d+)', s)
+    m = re.search(r"bin[_\s]*(\d+)", s)
     if m:
         return float(m.group(1))
 
-    # numeric range like 0.0-0.1 or 0.0 – 0.1
-    m2 = re.search(r'([0-9]*\.?[0-9]+)\s*[-–—]\s*([0-9]*\.?[0-9]+)', s)
+    m2 = re.search(r"([0-9]*\.?[0-9]+)\s*[-–—]\s*([0-9]*\.?[0-9]+)", s)
     if m2:
         a = float(m2.group(1)); b = float(m2.group(2))
         return (a + b) / 2.0
 
-    # single float like '0.75'
-    m3 = re.search(r'^\d*\.?\d+$', s)
+    m3 = re.search(r"^\d*\.?\d+$", s)
     if m3:
         return float(s)
 
-    # trailing digit fallback
-    m4 = re.search(r'(\d+)$', s)
+    m4 = re.search(r"(\d+)$", s)
     if m4:
         return float(m4.group(1))
 
-    # final fallback: very low (lowest)
     return -9999.0
 
-# compute desired column order: sort fc.columns by col_score descending -> highest prob left
-desired_col_order = sorted(list(fc.columns), key=lambda c: -col_score(c))
 
-# fallback: if all scores identical, reverse sum_cols2
-if len(set(col_score(c) for c in fc.columns)) == 1:
-    desired_col_order = list(sum_cols2[::-1])
+def mingle_neighborhoods_scverse(
+    adata: ad.AnnData,
+    *,
+    tu1="Inner Follicle",
+    tu2="Outer Follicle",
+    extra_cols=("x","y","unique_region","Neighborhood","Cell Type","Tissue Unit","Community"),
+    # Neighborhoods() params
+    ks=(10,20,30,50,100),
+    k=20,
+    distance_max=1000,
+    # keys
+    X="x",
+    Y="y",
+    reg="unique_region",
+    neigh="Neighborhood",
+    cluster_col="Probability_Level",
+    celltype="Cell Type",
+    tiss="Tissue Unit",
+    comm="Community",
+    # binning
+    n_bins=5,
+    bin_labels=("Very Low","Low","Medium","High","Very High"),
+    use_quantiles=True,
+    # clustering
+    n_clusters=5,
+    target_neighborhoods=("Inner Follicle","Outer Follicle"),
+    random_state=0,
+    # outputs
+    out_score_key="Score",
+    out_prob_level_key="Probability_Level",
+    out_neighborhood_key=None,              # default becomes f"neighborhood{k}"
+    out_prob_cluster_key="Probability_Bin_Cluster",
+    store_windows_key="mingle_windows",
+    store_fc_key="mingle_fc",
+):
+    """
+    Wraps your exact logic into an AnnData-friendly function.
 
-# pick the high bin automatically as the first column in the desired_col_order
-high_bin = desired_col_order[0]
+    Writes:
+      adata.obs[out_score_key]
+      adata.obs[out_prob_level_key]
+      adata.obs[out_neighborhood_key]  (=-1 outside target neighborhoods)
+      adata.obs[out_prob_cluster_key]  ("0".."n_clusters-1" for target rows else NaN)
+    Stores:
+      adata.uns[store_windows_key][k] = windows df for that k
+      adata.uns[store_fc_key] = fc dataframe
+      adata.uns["mingle_probability_edges"] = edges_used
+    Returns:
+      adata, df_sub (obs subset), fc, windows_k, edges_used
+    """
+    if out_neighborhood_key is None:
+        out_neighborhood_key = f"neighborhood{k}"
 
-# compute row order by descending enrichment for the highest-probability bin
-ordered_rows = fc[high_bin].sort_values(ascending=False).index.tolist()
+    # ---- Build df2 exactly like you did, but from adata.obs
+    obs = adata.obs.copy()
 
-# reindex fc to enforce row and column ordering
-fc = fc.reindex(index=ordered_rows, columns=desired_col_order)
+    needed = [tu1, tu2, *extra_cols]
+    missing = [c for c in needed if c not in obs.columns]
+    if missing:
+        raise KeyError(f"Missing required adata.obs columns: {missing}")
+
+    df2 = obs[[tu1, tu2, *extra_cols]].copy()
+
+    eps = 1e-9
+    df2["ratio"] = (df2[tu1].astype(float) + eps) / (df2[tu2].astype(float) + eps)
+    df2["log_ratio"] = np.log(df2["ratio"])
+    df2["max_prob"] = df2[[tu1, tu2]].astype(float).max(axis=1)
+    df2[out_score_key] = df2["log_ratio"] * df2["max_prob"]
+
+    df2[out_prob_level_key], edges_used = assign_probability_level_with_edges(
+        df2[out_score_key], n_bins=n_bins, labels=list(bin_labels), use_quantiles=use_quantiles
+    )
+
+    # ---- Neighborhood windows (your class)
+    df = df2.copy().reset_index(drop=True)
+
+    sum_cols = list(df[out_prob_level_key].unique())
+    keep_cols = [X, Y, reg, neigh, celltype, comm, tiss, out_prob_level_key]
+
+    Neigh = Neighborhoods(
+        df,
+        ks=list(ks),
+        cluster_col=out_prob_level_key,
+        sum_cols=sum_cols,
+        keep_cols=keep_cols,
+        neigh=neigh,
+        X=X, Y=Y, reg=reg,
+        add_dummies=True,
+    )
+    cluster_name_windows = Neigh.k_windows(distance_max=distance_max)
+    windows_k = cluster_name_windows[k].copy()
+
+    # ---- dummies + sum_cols2 exactly like you did
+    df = pd.concat([df, pd.get_dummies(df[out_prob_level_key], dtype=int)], axis=1)
+    sum_cols2 = pd.get_dummies(df[out_prob_level_key], dtype=int).columns.tolist()
+
+    # ---- align indices (same assumption as your code)
+    if not windows_k.index.equals(df.index):
+        if len(windows_k) == len(df):
+            windows_k = windows_k.reset_index(drop=True)
+            df = df.reset_index(drop=True)
+        else:
+            raise ValueError("windows_k and df indices differ and lengths differ; align them before filtering.")
+
+    # ---- subset to target neighborhoods
+    mask = df[neigh].isin(list(target_neighborhoods))
+    windows_sub = windows_k.loc[mask].copy()
+    df_sub = df.loc[mask].copy()
+
+    # ---- cluster
+    km = MiniBatchKMeans(n_clusters=int(n_clusters), random_state=random_state)
+
+    if set(sum_cols2).issubset(windows_sub.columns):
+        feature_matrix = windows_sub[sum_cols2].values
+    else:
+        feature_matrix = df_sub[sum_cols2].values
+
+    labels_sub = km.fit_predict(feature_matrix)
+
+    # ---- write labels back like you did
+    df[out_neighborhood_key] = -1
+    df.loc[mask, out_neighborhood_key] = labels_sub
+    df_sub[out_neighborhood_key] = labels_sub
+
+    # ---- fold-change
+    niche_clusters = km.cluster_centers_
+    values_sub = df_sub[sum_cols2].values
+    tissue_avgs = values_sub.mean(axis=0)
+
+    eps_fc = 1e-12
+    tissue_row = tissue_avgs.reshape(1, -1)
+    niche_plus = niche_clusters + tissue_row
+    row_sums = niche_plus.sum(axis=1, keepdims=True)
+    normed = niche_plus / (row_sums + eps_fc)
+    fc_array = np.log2((normed + eps_fc) / (tissue_row + eps_fc))
+    fc = pd.DataFrame(fc_array, columns=sum_cols2)
+
+    # ---- order fc exactly like you did
+    desired_col_order = sorted(list(fc.columns), key=lambda c: -_col_score(c))
+    if len(set(_col_score(c) for c in fc.columns)) == 1:
+        desired_col_order = list(sum_cols2[::-1])
+    high_bin = desired_col_order[0]
+    ordered_rows = fc[high_bin].sort_values(ascending=False).index.tolist()
+    fc = fc.reindex(index=ordered_rows, columns=desired_col_order)
+
+    # ---- Probability_Bin_Cluster map 0..n_clusters-1 to strings, same as your n_conversion_20
+    conv = {i: str(i) for i in range(int(n_clusters))}
+    df_sub[out_prob_cluster_key] = df_sub[out_neighborhood_key].map(conv)
+
+    # ---- write results back into AnnData (match original row order)
+    # df is reset_index(drop=True) so its order corresponds to adata.obs order if adata.obs was not permuted.
+    # safest: align by position.
+    adata.obs[out_score_key] = df2[out_score_key].values
+    adata.obs[out_prob_level_key] = df2[out_prob_level_key].values
+    adata.obs[out_neighborhood_key] = df[out_neighborhood_key].values
+
+    # full-length Probability_Bin_Cluster: NaN for non-target rows
+    full_prob_cluster = pd.Series([np.nan] * len(df), index=df.index, dtype="object")
+    full_prob_cluster.loc[mask] = df_sub[out_prob_cluster_key].values
+    adata.obs[out_prob_cluster_key] = full_prob_cluster.values
+
+    # store artifacts
+    adata.uns["mingle_probability_edges"] = edges_used
+    adata.uns.setdefault(store_windows_key, {})
+    (adata.uns[store_windows_key])[int(k)] = windows_k
+    adata.uns[store_fc_key] = fc
+
+    return adata, df_sub, fc, windows_k, edges_used
 
 
-n_conversion_20 = {
-    0: '0',
-    1: '1',
-    2: '2',
-    3: '3',
-    4: '4',
 
-}
-df_sub['Probability_Bin_Cluster']=df_sub[neighborhood_name].map(n_conversion_20)
-print(df_sub)
-print(df_sub['Probability_Bin_Cluster'])
-print(df_sub['neighborhood20'])

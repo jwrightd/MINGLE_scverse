@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-def rnd_patient_divergence(
+def dpp(
     delta: Union[pd.DataFrame, str],
     *,
     # ---- wide -> long settings (if input is a wide csv/df) ----

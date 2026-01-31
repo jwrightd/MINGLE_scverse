@@ -1,31 +1,27 @@
-#Import Packages
-import pandas as pd
-import seaborn as sns
-import numpy as np
-from scipy.stats import norm
+import anndata as ad
+import MINGLE as mg
+adata = mg.pp.read_file(r"/Volumes/data/MINGLE/Data/Intestine/20251217_intestine_inner_outerfollicle_probabilitybincluster_2probbins.csv")
 
-import time
-import sys
-import matplotlib.pyplot as plt
-import math
-import os
 
-from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
+out = mg.tl.gb(
+    adata,
+    cluster_key="Probability_Bin_Cluster",
+    score_key="Score",
+    neighborhood_key="Neighborhood",
+    inner_name="Inner Follicle",
+    outer_name="Outer Follicle",
+    min_cells=10,
+    pb_prefix="pb",
+    region_key="unique_region",
+    region_value="B006_Descending - Sigmoid",
+    x_key="x",
+    y_key="y",
+    k_neighbors=20,
+    normalize_by="iqr",
+    grad_prefix="grad",
+    make_plots=True,
+)
 
-df = pd.read_csv(r"Z:\MINGLE\Data\Intestine\intestine_all_information_2.csv")
-df_probabilities = pd.read_csv(r"Z:\MINGLE\Data\Intestine\all_cells_all_neighborhood_probs")
-total_df = pd.read_csv(r"Z:\MINGLE\Data\Intestine\20251217_intestine_inner_outerfollicle_probabilitybincluster_2probbins.csv")
-loaded_palette_hex = {0: '#e41a1c',
- 1: '#377eb8',
- 2: '#4daf4a',
- 3: '#984ea3',
- 4: '#ff7f00',
- 5: '#ffff33',
- 6: '#a65628',
- 7: '#f781bf',
- 8: '#999999',
- 9: '#e41a1c'}
-
+# Same “reference tables” your script prints:
+print(adata.uns["pb_agg_df"])
+print("Summary:", adata.uns["grad_summary"])

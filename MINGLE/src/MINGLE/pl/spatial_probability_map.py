@@ -7,10 +7,18 @@ import matplotlib.pyplot as plt
 def spatial_probability_mapping(
     adata,
     centroids_csv_path,
+    cell_type_features,
     *,
     k=300,
     batch_size=20000,
     desired_region="B008_Sigmoid",
+    reg = "unique_region",
+    cluster_col = "Community",
+    X = "x" , # Variable for the X coordinate
+    Y = "y",  # Variable for the Y coordinate
+    neigh = "Neighborhood",
+    tiss_unit = "Tissue Unit",
+    cell_type = "Cell Type"
 ):
     # Equivalent to: df = pd.read_csv(...)
     df = adata.obs.copy()
@@ -18,15 +26,7 @@ def spatial_probability_mapping(
 
     # KNN
     cells = df
-
-    # Define column names that will be used for neighborhood analysis
-    X = "x"  # Variable for the X coordinate
-    Y = "y"  # Variable for the Y coordinate
-    reg = "unique_region"  # Variable for the filename or region identifier associated with coordinates
-    cluster_col = "Community"  # Variable for cell type/subtype classification
-    tiss_unit = "Tissue Unit"
-    neigh = "Neighborhood"
-    cell_type = "Cell Type"
+    
     keep_cols = [X, Y, reg, cluster_col, tiss_unit, neigh, cell_type]
     ks = [10,100,300]
     # IMPORTANT CHANGE: KNN takes adata (per your note)
@@ -39,18 +39,7 @@ def spatial_probability_mapping(
     windows2[cluster_col] = cells[cluster_col]
 
     # communties
-    cell_type_features = [
-        "Plasma Cell Enriched",
-        "Mature Epithelial",
-        "Innate Immune Enriched",
-        "Follicle",
-        "Adaptive Immune Enriched",
-        "Secretory Epithelial",
-        "CD66+ Mature Epithelial",
-        "CD8+ T Enriched IEL",
-        "Stroma",
-        "Smooth Muscle",
-    ]
+    
 
     # Adjust batch size according to your GPU memory (~8GB)
     batch_size = batch_size

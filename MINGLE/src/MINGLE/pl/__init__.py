@@ -4,3 +4,5 @@ from .gvs import *
 from .dv import *
 from .cnd import *
 from .rnd import *
+from .spatial_location_reg import *
+from .spatial_probability_map import *

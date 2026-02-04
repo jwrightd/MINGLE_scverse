@@ -6,3 +6,5 @@ from .cnd import *
 from .rnd import *
 from .spatial_location_reg import *
 from .spatial_probability_map import *
+from .violin import *
+from .cell_composition import *

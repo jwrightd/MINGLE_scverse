@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import anndata as ad
 
-
+ 
 def plot_global_vs_subset_horizontal_buckets(
     data: Union[pd.DataFrame, ad.AnnData],
     neighborhood: str,

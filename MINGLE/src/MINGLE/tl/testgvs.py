@@ -5,7 +5,7 @@ import seaborn as sns
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 # Load the wide-format delta DataFrame
-delta_df = pd.read_csv(r"Z:\MINGLE\Data\Esophagus\20251217_all_regions_delta_probs.csv")
+delta_df = pd.read_csv(r"/Volumes/data/MINGLE/Data/Esophagus/20251217_all_regions_delta_probs.csv")
 
 # Add 'region' column if missing
 if "region" not in delta_df.columns:
@@ -23,7 +23,7 @@ delta_long = delta_df.melt(
 
 # Clean up Neighborhood column names
 delta_long["Neighborhood"] = delta_long["Neighborhood"].str.replace("_delta", "", regex=False)
-
+ 
 # Keep only assigned neighborhood deltas
 delta_long = delta_long[delta_long["Neighborhood"] == delta_long["neigh_name"]].dropna(subset=["Delta"])
 # Count cells per region × neighborhood
@@ -120,3 +120,6 @@ plot_df = plot_df.dropna(subset=["region", "Neighborhood"]).reset_index(drop=Tru
 
 # attach context (useful for debugging / future legends)
 plot_df["Context"] = plot_df["region"].apply(map_region_to_context)
+
+
+print(plot_df)

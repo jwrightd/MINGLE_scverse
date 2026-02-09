@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from typing import Tuple, Optional, Union
 from typing import Optional
 
 import numpy as np
@@ -52,61 +52,48 @@ def mergeGMM(
     )
     return merged
 
-
 def findPositives(
     adata: AnnData,
     *,
     prob_key: str = "neighborhood_probabilities",
     threshold: float = 0.25,
     result_key: str = "Count_Above_Threshold",
+    prob_matrix: Optional[Union[pd.DataFrame, np.ndarray]] = None,
 ) -> AnnData:
     """
-    Count, per cell, how many neighborhood probabilities exceed a threshold.
+    Count per-cell how many probabilities exceed threshold.
 
-    This is the scverse-compatible version of your original `findPositives`,
-    but vectorized and using `adata.obsm[prob_key]` instead of `.obs` columns.
-
-    Parameters
-    ----------
-    adata
-        AnnData with a per-cell neighborhood probability matrix stored in
-        `adata.obsm[prob_key]`. Shape should be (n_cells, n_neighborhoods).
-    prob_key
-        Key in `adata.obsm` where the neighborhood probability matrix is stored.
-        Can be a NumPy array or a pandas DataFrame. If a DataFrame, its index
-        should align with `adata.obs_names`.
-    threshold
-        Probability threshold. For each cell, we count how many neighborhood
-        probabilities are strictly greater than this value.
-    result_key
-        Name of the column to create in `adata.obs` where the counts are stored.
-
-    Returns
-    -------
-    AnnData
-        The same AnnData object (mutated in-place) with a new column
-        `adata.obs[result_key]` containing the counts.
+    If prob_matrix is provided (DataFrame or ndarray) it will be used instead
+    of adata.obsm[prob_key]. In that case, adata is not modified except to
+    store result_key in adata.obs.
     """
-    if prob_key not in adata.obsm:
-        raise KeyError(f"{prob_key!r} not found in adata.obsm")
-
-    prob_raw = adata.obsm[prob_key]
-
-    # Align with obs and get a 2D array
-    if isinstance(prob_raw, pd.DataFrame):
-        probs = prob_raw.reindex(adata.obs_names).to_numpy()
+    # get matrix
+    if prob_matrix is None:
+        if prob_key not in adata.obsm:
+            raise KeyError(f"{prob_key!r} not found in adata.obsm")
+        prob_raw = adata.obsm[prob_key]
+        if isinstance(prob_raw, pd.DataFrame):
+            probs = prob_raw.reindex(adata.obs_names).to_numpy()
+        else:
+            probs = np.asarray(prob_raw)
+            if probs.shape[0] != adata.n_obs:
+                raise ValueError("shape mismatch")
     else:
-        probs = np.asarray(prob_raw)
-        if probs.shape[0] != adata.n_obs:
-            raise ValueError(
-                f"adata.obsm[{prob_key!r}] has shape {probs.shape}, "
-                f"but expected first dimension == n_obs ({adata.n_obs})"
-            )
+        if isinstance(prob_matrix, pd.DataFrame):
+            # ensure row order aligns with adata.obs_names if indices provided
+            if list(prob_matrix.index) == list(adata.obs_names):
+                probs = prob_matrix.to_numpy()
+            else:
+                # try reindex to adata.obs_names if possible
+                try:
+                    probs = prob_matrix.reindex(adata.obs_names).to_numpy()
+                except Exception:
+                    probs = prob_matrix.to_numpy()
+        else:
+            probs = np.asarray(prob_matrix)
+            if probs.shape[0] != adata.n_obs:
+                raise ValueError("prob_matrix row count does not match adata.n_obs")
 
-    # Vectorized count: how many neighborhoods per cell have p > threshold
-    counts = (probs > threshold).sum(axis=1)
-
-    # Store result in .obs
-    adata.obs[result_key] = counts.astype(int)
-
+    counts = (probs > threshold).sum(axis=1).astype(int)
+    adata.obs[result_key] = counts
     return adata

@@ -1,4 +1,4 @@
-from .centroids import *
+from .Centroids import *
 from .edges import *
 from .gmm import *
 from .knn import *

@@ -5,7 +5,10 @@ from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 from typing import Optional, Union, Dict, Sequence
 import anndata as ad
+import math
 from .knn import KNN
+import multiprocessing
+#multiprocessing.set_start_method('spawn')
 
 # Helper function to calculate probabilities for each cell (moved outside for parallelization)
 def calculate_probabilities_for_cell(args):
@@ -14,8 +17,8 @@ def calculate_probabilities_for_cell(args):
     neighborhood_probs = {}
 
     # Iterate through each centroid (neighborhood)
-    for centroid_row in centroid_rows:
-        neighborhood_name = centroid_row[neighborhood_col]
+    for _, centroid_row in centroid_rows:
+        neighborhood_name = _#centroid_row[neighborhood_col]
         total_prob = 1
 
         # For each cell type, calculate the probability
@@ -24,9 +27,10 @@ def calculate_probabilities_for_cell(args):
             std_col = f'{cell_type}_std'
 
             if mean_col in centroid_row and std_col in centroid_row:
-                mean = centroid_row[mean_col]
+                mean = centroid_row[mean_col] 
                 std = centroid_row[std_col]
-
+                #mean = math.trunc(mean * 1_000_000) / 1_000_000
+                #std = math.trunc(std * 1_000_000) / 1_000_000
                 # Get the value of the current cell for this cell type
                 cell_value = windows2.loc[cell_index, cell_type] if cell_type in windows2.columns else np.nan
 
@@ -95,32 +99,34 @@ def cpu_gmm_probability(
     windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
 
     # Step 2: List of neighborhoods and cell types to loop through
-    neighborhoods_to_loop = CELLS_ADATA.obs[neighborhood_col].unique().tolist()
+    #neighborhoods_to_loop = CELLS_ADATA.obs[neighborhood_col].unique().tolist()
     cell_type_features = CELLS_ADATA.obs[cluster_col].unique()
 
     # Extract centroid data as a list of rows (to pass to the multiprocessing pool)
-    centroid_rows = CENTROIDS_ADATA.obs.to_dict(orient='records')
+    centroid_rows = CENTROIDS_ADATA.to_df().iterrows() #HERE
+    centroid_rows = [(idx, row.to_dict()) for idx, row in centroid_rows]
 
     # Function to parallelize calculations across all cells
-    def parallelize_probability_calculations(windows2, CELLS_ADATA, centroid_rows, cell_type_features, neighborhood_col, num_processes):
-        # Use specified number of processes or default to all available CPUs
+    def parallelize_probability_calculations(windows2, centroid_rows, cell_type_features, neighborhood_col, num_processes):
         if num_processes is None:
             num_processes = cpu_count()
-        print(num_processes)
-        # Prepare the arguments to pass into the function (cell_index, windows2, centroid_rows, cell_type_features, neighborhood_col)
+
+        print(f"Using {num_processes} processes.")
+
         task_args = [
             (cell_index, windows2, centroid_rows, cell_type_features, neighborhood_col)
             for cell_index in windows2.index
         ]
 
-        # Use multiprocessing Pool with tqdm progress bar
         with Pool(num_processes) as pool:
-            results = list(tqdm(pool.imap(calculate_probabilities_for_cell, task_args), total=len(windows2)))
+            results = pool.map(calculate_probabilities_for_cell, task_args)
 
         return results
 
+    #print(windows2)
+
     # Parallelize the calculations
-    probabilities_list = parallelize_probability_calculations(windows2, CELLS_ADATA, centroid_rows, cell_type_features, neighborhood_col, num_processes)
+    probabilities_list = parallelize_probability_calculations(windows2, centroid_rows, cell_type_features, neighborhood_col, num_processes)
 
     # Convert the results into a DataFrame
     probabilities_df = pd.DataFrame(probabilities_list, index=windows2.index)

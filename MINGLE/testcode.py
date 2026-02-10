@@ -1,25 +1,60 @@
 import MINGLE as mg
+import pandas as pd
+import anndata as ad
 
-def main():
-    print("version:", getattr(mg, "__version__", None))
+path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_from_h5mu.csv"
+probabilities_path = r"/Volumes/data/MINGLE/Data/Esophagus/all_regions_esophagus_all_cells_all_neighborhood_probs.csv"
 
-    # Test run
-    file_path = r"/Volumes/data/MINGLE/Data/Intestine/05_25_huBMAP_tunit.csv"
-    cells = mg.pp.read_file(file_path)
-    centroids = mg.tl.centroid_Calculation(cells, cluster_col="Cell Type", neighborhood_col="Neighborhood")
-    updated_adata = mg.tl.cpu_gmm_probability(cells, centroids, 
-                                               cluster_col="Cell Type", 
-                                               neighborhood_col="Neighborhood",
-                                               ks=(5, 10),
-                                               num_processes=None)
+out_probs_path = "local_probs_ad.csv"
+out_delta_path = "delta_probs_ad.csv"
 
-    # Optional: print output of combined DataFrame (if needed)
-    # X_df = pd.DataFrame(centroids.X, index=centroids.obs.index, columns=centroids.var.index)
-    # combined_df = pd.concat([centroids.obs, X_df], axis=1)
-    # with pd.option_context("display.max_rows", None, "display.max_columns", None):
-    #     print(combined_df)
+X = 'x'
+Y = 'y'
+reg = 'region'
+cluster_col = 'Cell Type'
+cellid = 'cellid'
+neigh = 'neigh_name'
 
-# Ensure multiprocessing code runs only when executed directly
-if __name__ == "__main__":
-    main()
+keep_cols = [X, Y, reg, cluster_col, cellid, neigh, path]
+
+cells = mg.pp.read_file(path)
+
+copy_cells = cells.obs.copy()
+
+print(cells)           # AnnData summary
+print(cells.obs.head())  # show first obs rows (equivalent to your df.head())
+print(cells.obs.shape)
+
+windows = mg.tl.KNN2(
+    cells,
+    x_key=X,
+    y_key=Y,
+    region_key=reg,          # <-- use 'region'
+    cluster_col=cluster_col, # <-- use 'Cell Type'
+    keep_obs_cols=keep_cols,
+)
+
+k = 10
+windows2 = windows[k]
+windows2[cluster_col] = cells.obs[cluster_col].values
+
+cell_type_features = [
+    'Squamous Annexin A1+', 'Squamous p63+', 'Endothelial', 'Chief',
+    'Squamou p63+ EGFRhi', 'Neutrophil', 'M1 Macrophage', 'Epithelial',
+    'Stroma', 'Epithelial Ki67+ p53+', 'Endothelial CD36hi',
+    'CD4+ Treg', 'CD4+ T cell PD1+', 'CD4+ T cell', 'Nerve',
+    'CD8+ T cell', 'Epithelial MUC1+ Ki67+', 'B cell',
+    'CD8+ T cell PD1+', 'M2 Macrophage', 'Foveloar', 'Neuroendocrine',
+    'Epithelial CK7+ p53+', 'Smooth Muscle', 'Epithelial pH2AX+', 'DC',
+    'Plasma', 'Epithelial p53+', 'Endothelial aSMAhi', 'Lymphatic',
+    'Neck', 'Goblet', 'Parietal', 'Epithelial CD73hi',
+    'Foveloar Ki67+ p53+', 'Stroma CD73+', 'Goblet p53+', 'Neck p53+',
+    'Lymphatic CD73+', 'Epithelial CK7+', 'Foveloar p53+',
+    'Goblet Ki67+ p53+', 'Paneth', 'Epithelial HLADR+',
+    'Neck Ki67+ p53+'
+]
+
+probabilities_df = pd.read_csv(probabilities_path)
+
+probs, deltas = mg.tl.crd(cells, windows2, probabilities_df, cell_type_features)
 

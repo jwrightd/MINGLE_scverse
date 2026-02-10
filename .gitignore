@@ -24,3 +24,4 @@ __pycache__/
 MINGLE/src/MINGLE/pl/Edges_pl.ipynb
 MINGLE/src/MINGLE/pl/GMM_pl.ipynb
 
+*.csv

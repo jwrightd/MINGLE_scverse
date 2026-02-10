@@ -1,8 +1,5 @@
-#dependencies
-
 import anndata as ad
 import numpy as np
-import time
 import pandas as pd
 
 from sklearn.neighbors import NearestNeighbors
@@ -102,7 +99,7 @@ def centroid_Calculation(
     results_df = pd.DataFrame(all_results).set_index(neighborhood_col)
 
     feature_cols = results_df.columns.tolist()
-    X = results_df[feature_cols].to_numpy(dtype=np.float32)
+    X = results_df[feature_cols].to_numpy(dtype=np.float64)
 
     # obs: neighborhoods
     obs = pd.DataFrame(index=results_df.index)

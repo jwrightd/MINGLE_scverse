@@ -6,7 +6,7 @@ from tqdm import tqdm
 from typing import Optional, Union, Dict, Sequence
 import anndata as ad
 import math
-from .knn import KNN
+from .knn2 import KNN2
 import multiprocessing
 #multiprocessing.set_start_method('spawn')
 
@@ -58,6 +58,7 @@ def cpu_gmm_probability(
     *,
     cluster_col: str = "cell_type",  # Default cluster column in obs
     neighborhood_col: str = "neighborhood",  # Default neighborhood column in obs
+    region_key: str = "unique_region",
     ks: Sequence[int] = (5, 10, 20),  # List of k values for neighbors
     threshold: float = 0.25,  # Probability threshold for counting
     num_processes: Optional[int] = None,  # Optional: number of processes for parallelism (defaults to max CPUs)
@@ -93,7 +94,7 @@ def cpu_gmm_probability(
         raise KeyError(f"One or more required columns ({neighborhood_col}, {cluster_col}) are missing in obs.")
 
     # Step 1: Get KNN neighborhood windows
-    windows = KNN(CELLS_ADATA, cluster_col=cluster_col, ks=ks)
+    windows = KNN2(CELLS_ADATA, cluster_col=cluster_col, region_key=region_key, ks=ks)
     k = 10  # You can change this if needed, default is 10
     windows2 = windows[k]
     windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values

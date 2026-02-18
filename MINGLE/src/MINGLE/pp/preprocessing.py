@@ -3,7 +3,6 @@ from typing import Union
 import anndata as ad
 import numpy as np
 import pandas as pd
-import muon as mu
 
 def read_file(path: Union[str, Path]) -> ad.AnnData:
     """

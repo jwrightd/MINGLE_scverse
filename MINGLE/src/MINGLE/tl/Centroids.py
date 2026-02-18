@@ -9,7 +9,7 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
-from .knn import KNN
+from .knn2 import KNN2
 
 
 def centroid_Calculation(
@@ -18,6 +18,7 @@ def centroid_Calculation(
     k: int = 10,
     cluster_col: str = "cell_type",
     neighborhood_col: str = "neighborhood",
+    region_col: str = "unique_region",
     store_key: Optional[str] = None,
 ) -> ad.AnnData:
     """
@@ -56,7 +57,7 @@ def centroid_Calculation(
           - X: numeric matrix (n_neighborhoods x n_features)
     """
     # get KNN windows
-    windows = KNN(adata, cluster_col=cluster_col)
+    windows = KNN2(adata, region_key=region_col, cluster_col=cluster_col)
     if k not in windows:
         raise ValueError(f"k={k} not in available ks from KNN: {list(windows.keys())}")
 

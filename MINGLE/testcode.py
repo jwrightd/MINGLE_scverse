@@ -19,12 +19,6 @@ keep_cols = [X, Y, reg, cluster_col, cellid, neigh, path]
 
 cells = mg.pp.read_file(path)
 
-copy_cells = cells.obs.copy()
-
-print(cells)           # AnnData summary
-print(cells.obs.head())  # show first obs rows (equivalent to your df.head())
-print(cells.obs.shape)
-
 windows = mg.tl.KNN2(
     cells,
     x_key=X,

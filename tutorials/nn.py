@@ -9,7 +9,6 @@ X = "x"
 Y = "y"
 reg = "unique_region"
 cluster_col = "Cell Type"
-
 sum_cols = list(adata.obs[cluster_col].unique())
 keep_cols = [X, Y, reg, cluster_col]
 
@@ -29,8 +28,8 @@ adata_windows.uns["knn_windows"] = {
 }
 
 summary_df, per_cell_df = mg.tl.run_mingle_over_n_clusters(
-    adata=adata_windows,          # <-- AnnData in, AnnData updated in-place
-    knn_feature_cols=sum_cols,    # same as your call
+    adata=adata_windows,        
+    knn_feature_cols=sum_cols,   
     n_range=range(1, 51),
     return_per_cell=True,
     plot_summary=True,

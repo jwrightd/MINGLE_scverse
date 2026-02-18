@@ -1,7 +1,7 @@
 import anndata as ad
 import MINGLE as mg
-adata = mg.pp.read_file(r"/Volumes/data/MINGLE/Data/Intestine/20251217_intestine_inner_outerfollicle_probabilitybincluster_2probbins.csv")
 
+adata = mg.pp.read_file(r"/Volumes/data/MINGLE/Data/Intestine/20251217_intestine_inner_outerfollicle_probabilitybincluster_2probbins.csv")
 
 out = mg.tl.gb(
     adata,

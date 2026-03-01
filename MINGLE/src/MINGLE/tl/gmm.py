@@ -59,7 +59,8 @@ def cpu_gmm_probability(
     cluster_col: str = "cell_type",  # Default cluster column in obs
     neighborhood_col: str = "neighborhood",  # Default neighborhood column in obs
     region_key: str = "unique_region",
-    ks: Sequence[int] = (5, 10, 20),  # List of k values for neighbors
+    ks: Sequence[int] = (10, 20, 100, 300),  # List of k values for neighbors
+    k: int = 10,
     threshold: float = 0.25,  # Probability threshold for counting
     num_processes: Optional[int] = None,  # Optional: number of processes for parallelism (defaults to max CPUs)
 ) -> ad.AnnData:
@@ -95,7 +96,6 @@ def cpu_gmm_probability(
 
     # Step 1: Get KNN neighborhood windows
     windows = KNN2(CELLS_ADATA, cluster_col=cluster_col, region_key=region_key, ks=ks)
-    k = 10  # You can change this if needed, default is 10
     windows2 = windows[k]
     windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
 

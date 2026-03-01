@@ -1,7 +1,10 @@
 import MINGLE as mg
 # ---- Load with MINGLE ----
 adata = mg.pp.read_file(r"/Volumes/data/MINGLE/Data/Melanoma/melanoma_all_information.csv")
-
+print(adata)
+print(adata.obs)
+print(adata.obsm)
+print(adata.uns)
 neighborhood_cols = [
     "Stromal Enriched", "Vasculature", "Neutrophil Enriched",
     "Macrophage Enriched Immune", "Vasculature & Immune",
@@ -14,7 +17,7 @@ neighborhood_cols = [
 # ---- Example call ----
 fig, ax, masks = mg.pl.spatial_loc_region(
     adata,
-    region="14_06_23_reg002.tsv",
+    region= "05_06_23_reg003.tsv",#"14_06_23_reg002.tsv",
     n1="Inflamed Tumor",
     n2="Productive T cell & Tumor",
     threshold=0.25,

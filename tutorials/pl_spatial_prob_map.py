@@ -1,4 +1,5 @@
 import MINGLE as mg
+import pandas as pd
 
 adata = mg.pp.read_file(r"/Volumes/data/MINGLE/Data/Intestine/05_25_HuBMAP_tunit.csv")
 cell_type_features = [
@@ -15,7 +16,7 @@ cell_type_features = [
     ]
 probabilities_df, visualization_df, filtered_region_df = mg.pl.spatial_probability_mapping(
     adata,
-    centroids_csv_path=r"/Volumes/data/MINGLE/Data/Intestine/intestine_all_neighborhood_centroids_tissueunit.csv",
+    pd.read_csv("/Volumes/data/MINGLE/Data/Intestine/intestine_all_neighborhood_centroids_tissueunit.csv"),
     cell_type_features = cell_type_features,
     k=300,
     batch_size=20000,

@@ -9,3 +9,4 @@ from .spatial_probability_map import *
 from .violin import *
 from .cell_composition import *
 from .edges_pp import *
+from .enrichment import *

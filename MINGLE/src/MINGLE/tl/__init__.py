@@ -9,3 +9,5 @@ from .crd import *
 from .ccd import *
 from .grad import *
 from .gb import *
+from .utils_adata import *
+from .compute_proportions import *

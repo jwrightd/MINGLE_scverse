@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 def spatial_probability_mapping(
     adata,
-    centroids_csv_path,
+    centroids,
     cell_type_features,
     *,
     k=300,
@@ -22,7 +22,7 @@ def spatial_probability_mapping(
 ):
     # Equivalent to: df = pd.read_csv(...)
     df = adata.obs.copy()
-    df_centroids = pd.read_csv(centroids_csv_path)
+    df_centroids = centroids
 
     # KNN
     cells = df

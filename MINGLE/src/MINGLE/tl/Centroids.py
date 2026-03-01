@@ -58,6 +58,7 @@ def centroid_Calculation(
     """
     # get KNN windows
     windows = KNN2(adata, region_key=region_col, cluster_col=cluster_col)
+    print(windows)
     if k not in windows:
         raise ValueError(f"k={k} not in available ks from KNN: {list(windows.keys())}")
 
@@ -71,6 +72,8 @@ def centroid_Calculation(
 
     # cell types → columns we created in KNN
     cell_type_columns = adata.obs[cluster_col].unique()
+    print(cell_type_columns)
+    print(type(cell_type_columns))
     windows_k[cell_type_columns] = windows_k[cell_type_columns].astype("float32")
 
     neighborhoods_to_loop = adata.obs[neighborhood_col].unique()

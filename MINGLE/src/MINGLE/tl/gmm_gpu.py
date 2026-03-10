@@ -5,7 +5,7 @@ import cupy as cp
 from .knn import KNN
 
 def gpu_gmm_probability(
-    adata: ad.AnnData,
+    cells: ad.AnnData,
     centroids: ad.AnnData,
     *,
     cluster_col: str = "Cell Type",
@@ -13,11 +13,11 @@ def gpu_gmm_probability(
     k: int = 10,
     batch_size: int = 20000,
 ):
-    windows = KNN(adata, cluster_col=cluster_col)
+    windows = KNN(cells, cluster_col=cluster_col)
     win = windows[k].copy()
 
-    win[cluster_col] = adata.obs[cluster_col].values
-    cell_types = adata.obs[cluster_col].unique().tolist()
+    win[cluster_col] = cells.obs[cluster_col].values
+    cell_types = cells.obs[cluster_col].unique().tolist()
 
     # centroids.var.index contains names like "NK_mean", "NK_std"
     mean_cols = [f"{ct}_mean" for ct in cell_types]
@@ -64,7 +64,10 @@ def gpu_gmm_probability(
 
     final = pd.concat(outputs).sort_index()
 
-    adata.obsm["neighborhood_probabilities"] = final.values
-    adata.uns["neighborhood_probability_neighborhoods"] = nb_names
+    cells.obsm["neighborhood_probability"] = final.values
+    cells.uns["neighborhood_probability_neighborhoods"] = nb_names
 
-    return adata
+    nb_names = cells.uns['neighborhood_probability_neighborhoods']
+    cells.obs[nb_names] = pd.DataFrame(cells.obsm['neighborhood_probability'], index=cells.obs_names, columns=nb_names)
+
+    return cells

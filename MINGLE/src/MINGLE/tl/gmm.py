@@ -53,8 +53,8 @@ def calculate_probabilities_for_cell(args):
     return neighborhood_probs
 
 def cpu_gmm_probability(
-    CELLS_ADATA: ad.AnnData,
-    CENTROIDS_ADATA: ad.AnnData,
+    cells: ad.AnnData,
+    centroids: ad.AnnData,
     *,
     cluster_col: str = "cell_type",  # Default cluster column in obs
     neighborhood_col: str = "neighborhood",  # Default neighborhood column in obs
@@ -67,14 +67,14 @@ def cpu_gmm_probability(
 
     Parameters
     ----------
-    CELLS_ADATA
+    cells
         AnnData object containing cell-level data (with cluster labels and coordinates).
-    CENTROIDS_ADATA
+    centroids
         AnnData object containing centroid data with neighborhood means and standard deviations for each cell type.
     cluster_col
-        Column in `CELLS_ADATA.obs` representing the cluster or cell type (default is 'cell_type').
+        Column in `cells.obs` representing the cluster or cell type (default is 'cell_type').
     neighborhood_col
-        Column in `CELLS_ADATA.obs` representing the neighborhood assignment (default is 'neighborhood').
+        Column in `cells.obs` representing the neighborhood assignment (default is 'neighborhood').
     ks
         Sequence of values for k (the number of neighbors) to compute neighborhood summaries.
     threshold
@@ -84,26 +84,26 @@ def cpu_gmm_probability(
 
     Returns
     -------
-    CELLS_ADATA
+    cells
         AnnData object with computed neighborhood probabilities stored in `obsm["neighborhood_probabilities"]`.
     """
 
     # Ensure neighborhood columns exist in obs
-    if neighborhood_col not in CELLS_ADATA.obs or cluster_col not in CELLS_ADATA.obs:
+    if neighborhood_col not in cells.obs or cluster_col not in cells.obs:
         raise KeyError(f"One or more required columns ({neighborhood_col}, {cluster_col}) are missing in obs.")
 
     # Step 1: Get KNN neighborhood windows
-    windows = KNN(CELLS_ADATA, cluster_col=cluster_col, ks=ks)
+    windows = KNN(cells, cluster_col=cluster_col, ks=ks)
     k = 10  # You can change this if needed, default is 10
     windows2 = windows[k]
-    windows2[cluster_col] = CELLS_ADATA.obs[cluster_col].values
+    windows2[cluster_col] = cells.obs[cluster_col].values
 
     # Step 2: List of neighborhoods and cell types to loop through
-    #neighborhoods_to_loop = CELLS_ADATA.obs[neighborhood_col].unique().tolist()
-    cell_type_features = CELLS_ADATA.obs[cluster_col].unique()
+    #neighborhoods_to_loop = cells.obs[neighborhood_col].unique().tolist()
+    cell_type_features = cells.obs[cluster_col].unique()
 
     # Extract centroid data as a list of rows (to pass to the multiprocessing pool)
-    centroid_rows = CENTROIDS_ADATA.to_df().iterrows() #HERE
+    centroid_rows = centroids.to_df().iterrows() #HERE
     centroid_rows = [(idx, row.to_dict()) for idx, row in centroid_rows]
 
     # Function to parallelize calculations across all cells
@@ -132,8 +132,8 @@ def cpu_gmm_probability(
     probabilities_df = pd.DataFrame(probabilities_list, index=windows2.index)
 
     # Step 3: Attach probabilities to AnnData object (store in obsm)
-    CELLS_ADATA.obsm["neighborhood_probabilities"] = probabilities_df.values
-    CELLS_ADATA.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
+    cells.obsm["neighborhood_probabilities"] = probabilities_df.values
+    cells.uns["neighborhood_probability_neighborhoods"] = list(probabilities_df.columns)
 
     # Return the updated AnnData object
-    return CELLS_ADATA
+    return cells

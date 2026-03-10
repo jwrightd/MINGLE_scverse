@@ -13,7 +13,7 @@ from .knn import KNN
 
 
 def centroid_Calculation(
-    adata: ad.AnnData,
+    cells: ad.AnnData,
     *,
     k: int = 10,
     cluster_col: str = "cell_type",
@@ -27,12 +27,12 @@ def centroid_Calculation(
 
     - keeps indices aligned (no reset_index)
     - allows choosing k
-    - optionally stores the centroid AnnData in `adata.uns[store_key]`
+    - optionally stores the centroid AnnData in `cells.uns[store_key]`
       so you can reuse it for many plots.
 
     Parameters
     ----------
-    adata
+    cells
         AnnData with:
           - `.obs[cluster_col]` (cell type labels)
           - `.obs[neighborhood_col]` (neighborhood assignment)
@@ -41,11 +41,11 @@ def centroid_Calculation(
         Neighborhood size to use from the KNN windows (must be in the `ks`
         list passed to KNN; default 10).
     cluster_col
-        Column in `adata.obs` with cell-type labels.
+        Column in `cells.obs` with cell-type labels.
     neighborhood_col
-        Column in `adata.obs` with neighborhood IDs.
+        Column in `cells.obs` with neighborhood IDs.
     store_key
-        If not None, store the centroid AnnData in `adata.uns[store_key]`.
+        If not None, store the centroid AnnData in `cells.uns[store_key]`.
 
     Returns
     -------
@@ -56,23 +56,23 @@ def centroid_Calculation(
           - X: numeric matrix (n_neighborhoods x n_features)
     """
     # get KNN windows
-    windows = KNN(adata, cluster_col=cluster_col)
+    windows = KNN(cells, cluster_col=cluster_col)
     if k not in windows:
         raise ValueError(f"k={k} not in available ks from KNN: {list(windows.keys())}")
 
     windows_k = windows[k]
 
     # ensure we have the cluster column on windows_k
-    windows_k[cluster_col] = adata.obs[cluster_col]
+    windows_k[cluster_col] = cells.obs[cluster_col]
 
     # use obs directly; keep original indices (no reset_index)
-    filtered_cells = adata.obs.copy()
+    filtered_cells = cells.obs.copy()
 
     # cell types → columns we created in KNN
-    cell_type_columns = adata.obs[cluster_col].unique()
+    cell_type_columns = cells.obs[cluster_col].unique()
     windows_k[cell_type_columns] = windows_k[cell_type_columns].astype("float32")
 
-    neighborhoods_to_loop = adata.obs[neighborhood_col].unique()
+    neighborhoods_to_loop = cells.obs[neighborhood_col].unique()
     all_results = []
 
     for neighborhood in neighborhoods_to_loop:
@@ -111,6 +111,6 @@ def centroid_Calculation(
     centroid_adata = ad.AnnData(X=X, obs=obs, var=var)
 
     if store_key is not None:
-        adata.uns[store_key] = centroid_adata
+        cells.uns[store_key] = centroid_adata
 
     return centroid_adata

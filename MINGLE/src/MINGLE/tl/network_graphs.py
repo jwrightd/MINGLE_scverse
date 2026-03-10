@@ -8,7 +8,7 @@ from anndata import AnnData
 
 
 def build_neighborhood_pair_graph(
-    adata: AnnData,
+    cells: AnnData,
     prob_cols: list[str],
     *,
     threshold: float = 0.25,
@@ -20,7 +20,7 @@ def build_neighborhood_pair_graph(
     display_sep: str = " ⟷ ",
 ) -> tuple[nx.Graph, pd.DataFrame]:
     """
-    Build a neighborhood-pair graph from `adata.obs[prob_cols]` (numeric probabilities).
+    Build a neighborhood-pair graph from `cells.obs[prob_cols]` (numeric probabilities).
 
     Logic preserved:
     - Count #neighborhood probs > threshold per cell
@@ -31,21 +31,21 @@ def build_neighborhood_pair_graph(
     """
 
     # Validate inputs
-    missing = [c for c in prob_cols + [region_key] if c not in adata.obs.columns]
+    missing = [c for c in prob_cols + [region_key] if c not in cells.obs.columns]
     if missing:
-        raise KeyError(f"Missing columns in adata.obs: {missing}")
+        raise KeyError(f"Missing columns in cells.obs: {missing}")
 
     # Probabilities -> numeric
-    probs = adata.obs[prob_cols].apply(pd.to_numeric, errors="coerce")
+    probs = cells.obs[prob_cols].apply(pd.to_numeric, errors="coerce")
 
     # Count > threshold per cell
     counts = (probs > threshold).sum(axis=1)
-    adata.obs[count_key] = counts.values
+    cells.obs[count_key] = counts.values
 
     # Subset: exactly 2 above threshold
-    mask = adata.obs[count_key] == 2
+    mask = cells.obs[count_key] == 2
     probs2 = probs.loc[mask]
-    regions = adata.obs.loc[mask, region_key]
+    regions = cells.obs.loc[mask, region_key]
 
     # Identify the two neighborhoods per row
     above = probs2.gt(threshold)
@@ -92,8 +92,8 @@ def build_neighborhood_pair_graph(
         n2 = row["Neighborhood2"]
         G.add_edge(n1, n2, weight=int(row["count"]))
 
-    # Store in adata.uns
-    adata.uns[uns_key] = {
+    # Store in cells.uns
+    cells.uns[uns_key] = {
         "threshold": threshold,
         "prob_cols": list(prob_cols),
         "region_key": region_key,
@@ -109,7 +109,7 @@ def build_neighborhood_pair_graph(
 
 
 def plot_neighborhood_pair_graph(
-    adata: AnnData,
+    cells: AnnData,
     *,
     uns_key: str = "neighborhood_pair_graph",
     layout_k: float = 10.0,
@@ -143,10 +143,10 @@ def plot_neighborhood_pair_graph(
     import networkx as nx
     from matplotlib.cm import get_cmap
 
-    if uns_key not in adata.uns:
-        raise KeyError(f"adata.uns does not contain '{uns_key}'. Run build_* first.")
+    if uns_key not in cells.uns:
+        raise KeyError(f"cells.uns does not contain '{uns_key}'. Run build_* first.")
 
-    payload = adata.uns[uns_key]
+    payload = cells.uns[uns_key]
     G: nx.Graph = payload["graph"]
 
     if G.number_of_edges() == 0:
